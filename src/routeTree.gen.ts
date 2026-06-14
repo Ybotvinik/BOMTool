@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UploadBomRouteImport } from './routes/upload-bom'
+import { Route as QualityRouteImport } from './routes/quality'
 import { Route as ProjectRouteImport } from './routes/project'
 import { Route as BomRouteImport } from './routes/bom'
 import { Route as IndexRouteImport } from './routes/index'
@@ -17,6 +18,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const UploadBomRoute = UploadBomRouteImport.update({
   id: '/upload-bom',
   path: '/upload-bom',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QualityRoute = QualityRouteImport.update({
+  id: '/quality',
+  path: '/quality',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProjectRoute = ProjectRouteImport.update({
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
+  '/quality': typeof QualityRoute
   '/upload-bom': typeof UploadBomRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
+  '/quality': typeof QualityRoute
   '/upload-bom': typeof UploadBomRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,22 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
+  '/quality': typeof QualityRoute
   '/upload-bom': typeof UploadBomRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/bom' | '/project' | '/upload-bom'
+  fullPaths: '/' | '/bom' | '/project' | '/quality' | '/upload-bom'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/bom' | '/project' | '/upload-bom'
-  id: '__root__' | '/' | '/bom' | '/project' | '/upload-bom'
+  to: '/' | '/bom' | '/project' | '/quality' | '/upload-bom'
+  id: '__root__' | '/' | '/bom' | '/project' | '/quality' | '/upload-bom'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BomRoute: typeof BomRoute
   ProjectRoute: typeof ProjectRoute
+  QualityRoute: typeof QualityRoute
   UploadBomRoute: typeof UploadBomRoute
 }
 
@@ -76,6 +86,13 @@ declare module '@tanstack/react-router' {
       path: '/upload-bom'
       fullPath: '/upload-bom'
       preLoaderRoute: typeof UploadBomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quality': {
+      id: '/quality'
+      path: '/quality'
+      fullPath: '/quality'
+      preLoaderRoute: typeof QualityRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/project': {
@@ -106,6 +123,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BomRoute: BomRoute,
   ProjectRoute: ProjectRoute,
+  QualityRoute: QualityRoute,
   UploadBomRoute: UploadBomRoute,
 }
 export const routeTree = rootRouteImport
