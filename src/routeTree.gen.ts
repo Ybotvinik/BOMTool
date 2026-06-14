@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UploadBomRouteImport } from './routes/upload-bom'
 import { Route as ProjectRouteImport } from './routes/project'
 import { Route as BomRouteImport } from './routes/bom'
 import { Route as IndexRouteImport } from './routes/index'
 
+const UploadBomRoute = UploadBomRouteImport.update({
+  id: '/upload-bom',
+  path: '/upload-bom',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectRoute = ProjectRouteImport.update({
   id: '/project',
   path: '/project',
@@ -33,34 +39,45 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
+  '/upload-bom': typeof UploadBomRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
+  '/upload-bom': typeof UploadBomRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
+  '/upload-bom': typeof UploadBomRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/bom' | '/project'
+  fullPaths: '/' | '/bom' | '/project' | '/upload-bom'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/bom' | '/project'
-  id: '__root__' | '/' | '/bom' | '/project'
+  to: '/' | '/bom' | '/project' | '/upload-bom'
+  id: '__root__' | '/' | '/bom' | '/project' | '/upload-bom'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BomRoute: typeof BomRoute
   ProjectRoute: typeof ProjectRoute
+  UploadBomRoute: typeof UploadBomRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/upload-bom': {
+      id: '/upload-bom'
+      path: '/upload-bom'
+      fullPath: '/upload-bom'
+      preLoaderRoute: typeof UploadBomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/project': {
       id: '/project'
       path: '/project'
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BomRoute: BomRoute,
   ProjectRoute: ProjectRoute,
+  UploadBomRoute: UploadBomRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
