@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ProjectRouteImport } from './routes/project'
+import { Route as BomRouteImport } from './routes/bom'
 import { Route as IndexRouteImport } from './routes/index'
 
 const ProjectRoute = ProjectRouteImport.update({
   id: '/project',
   path: '/project',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BomRoute = BomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -25,27 +31,31 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bom': typeof BomRoute
   '/project': typeof ProjectRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/project'
+  fullPaths: '/' | '/bom' | '/project'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/project'
-  id: '__root__' | '/' | '/project'
+  to: '/' | '/bom' | '/project'
+  id: '__root__' | '/' | '/bom' | '/project'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BomRoute: typeof BomRoute
   ProjectRoute: typeof ProjectRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/project'
       fullPath: '/project'
       preLoaderRoute: typeof ProjectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bom': {
+      id: '/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof BomRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BomRoute: BomRoute,
   ProjectRoute: ProjectRoute,
 }
 export const routeTree = rootRouteImport
