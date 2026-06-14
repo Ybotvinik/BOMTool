@@ -9,8 +9,74 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VersionsRouteImport } from './routes/versions'
+import { Route as UploadBomRouteImport } from './routes/upload-bom'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as RepQuoteRouteImport } from './routes/rep-quote'
+import { Route as QualityRouteImport } from './routes/quality'
+import { Route as ProjectRouteImport } from './routes/project'
+import { Route as FilesRouteImport } from './routes/files'
+import { Route as ExportRouteImport } from './routes/export'
+import { Route as ChinaQuoteRouteImport } from './routes/china-quote'
+import { Route as ChangesRouteImport } from './routes/changes'
+import { Route as BomRouteImport } from './routes/bom'
 import { Route as IndexRouteImport } from './routes/index'
 
+const VersionsRoute = VersionsRouteImport.update({
+  id: '/versions',
+  path: '/versions',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UploadBomRoute = UploadBomRouteImport.update({
+  id: '/upload-bom',
+  path: '/upload-bom',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RepQuoteRoute = RepQuoteRouteImport.update({
+  id: '/rep-quote',
+  path: '/rep-quote',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QualityRoute = QualityRouteImport.update({
+  id: '/quality',
+  path: '/quality',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectRoute = ProjectRouteImport.update({
+  id: '/project',
+  path: '/project',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FilesRoute = FilesRouteImport.update({
+  id: '/files',
+  path: '/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExportRoute = ExportRouteImport.update({
+  id: '/export',
+  path: '/export',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChinaQuoteRoute = ChinaQuoteRouteImport.update({
+  id: '/china-quote',
+  path: '/china-quote',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChangesRoute = ChangesRouteImport.update({
+  id: '/changes',
+  path: '/changes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BomRoute = BomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -19,28 +85,186 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bom': typeof BomRoute
+  '/changes': typeof ChangesRoute
+  '/china-quote': typeof ChinaQuoteRoute
+  '/export': typeof ExportRoute
+  '/files': typeof FilesRoute
+  '/project': typeof ProjectRoute
+  '/quality': typeof QualityRoute
+  '/rep-quote': typeof RepQuoteRoute
+  '/settings': typeof SettingsRoute
+  '/upload-bom': typeof UploadBomRoute
+  '/versions': typeof VersionsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bom': typeof BomRoute
+  '/changes': typeof ChangesRoute
+  '/china-quote': typeof ChinaQuoteRoute
+  '/export': typeof ExportRoute
+  '/files': typeof FilesRoute
+  '/project': typeof ProjectRoute
+  '/quality': typeof QualityRoute
+  '/rep-quote': typeof RepQuoteRoute
+  '/settings': typeof SettingsRoute
+  '/upload-bom': typeof UploadBomRoute
+  '/versions': typeof VersionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bom': typeof BomRoute
+  '/changes': typeof ChangesRoute
+  '/china-quote': typeof ChinaQuoteRoute
+  '/export': typeof ExportRoute
+  '/files': typeof FilesRoute
+  '/project': typeof ProjectRoute
+  '/quality': typeof QualityRoute
+  '/rep-quote': typeof RepQuoteRoute
+  '/settings': typeof SettingsRoute
+  '/upload-bom': typeof UploadBomRoute
+  '/versions': typeof VersionsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/bom'
+    | '/changes'
+    | '/china-quote'
+    | '/export'
+    | '/files'
+    | '/project'
+    | '/quality'
+    | '/rep-quote'
+    | '/settings'
+    | '/upload-bom'
+    | '/versions'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/bom'
+    | '/changes'
+    | '/china-quote'
+    | '/export'
+    | '/files'
+    | '/project'
+    | '/quality'
+    | '/rep-quote'
+    | '/settings'
+    | '/upload-bom'
+    | '/versions'
+  id:
+    | '__root__'
+    | '/'
+    | '/bom'
+    | '/changes'
+    | '/china-quote'
+    | '/export'
+    | '/files'
+    | '/project'
+    | '/quality'
+    | '/rep-quote'
+    | '/settings'
+    | '/upload-bom'
+    | '/versions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BomRoute: typeof BomRoute
+  ChangesRoute: typeof ChangesRoute
+  ChinaQuoteRoute: typeof ChinaQuoteRoute
+  ExportRoute: typeof ExportRoute
+  FilesRoute: typeof FilesRoute
+  ProjectRoute: typeof ProjectRoute
+  QualityRoute: typeof QualityRoute
+  RepQuoteRoute: typeof RepQuoteRoute
+  SettingsRoute: typeof SettingsRoute
+  UploadBomRoute: typeof UploadBomRoute
+  VersionsRoute: typeof VersionsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/versions': {
+      id: '/versions'
+      path: '/versions'
+      fullPath: '/versions'
+      preLoaderRoute: typeof VersionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/upload-bom': {
+      id: '/upload-bom'
+      path: '/upload-bom'
+      fullPath: '/upload-bom'
+      preLoaderRoute: typeof UploadBomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rep-quote': {
+      id: '/rep-quote'
+      path: '/rep-quote'
+      fullPath: '/rep-quote'
+      preLoaderRoute: typeof RepQuoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quality': {
+      id: '/quality'
+      path: '/quality'
+      fullPath: '/quality'
+      preLoaderRoute: typeof QualityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/project': {
+      id: '/project'
+      path: '/project'
+      fullPath: '/project'
+      preLoaderRoute: typeof ProjectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/files': {
+      id: '/files'
+      path: '/files'
+      fullPath: '/files'
+      preLoaderRoute: typeof FilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/export': {
+      id: '/export'
+      path: '/export'
+      fullPath: '/export'
+      preLoaderRoute: typeof ExportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/china-quote': {
+      id: '/china-quote'
+      path: '/china-quote'
+      fullPath: '/china-quote'
+      preLoaderRoute: typeof ChinaQuoteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/changes': {
+      id: '/changes'
+      path: '/changes'
+      fullPath: '/changes'
+      preLoaderRoute: typeof ChangesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bom': {
+      id: '/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof BomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -53,17 +277,18 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BomRoute: BomRoute,
+  ChangesRoute: ChangesRoute,
+  ChinaQuoteRoute: ChinaQuoteRoute,
+  ExportRoute: ExportRoute,
+  FilesRoute: FilesRoute,
+  ProjectRoute: ProjectRoute,
+  QualityRoute: QualityRoute,
+  RepQuoteRoute: RepQuoteRoute,
+  SettingsRoute: SettingsRoute,
+  UploadBomRoute: UploadBomRoute,
+  VersionsRoute: VersionsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
