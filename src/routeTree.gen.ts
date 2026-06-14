@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VersionsRouteImport } from './routes/versions'
 import { Route as UploadBomRouteImport } from './routes/upload-bom'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RepQuoteRouteImport } from './routes/rep-quote'
 import { Route as QualityRouteImport } from './routes/quality'
 import { Route as ProjectRouteImport } from './routes/project'
@@ -29,6 +30,11 @@ const VersionsRoute = VersionsRouteImport.update({
 const UploadBomRoute = UploadBomRouteImport.update({
   id: '/upload-bom',
   path: '/upload-bom',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RepQuoteRoute = RepQuoteRouteImport.update({
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
   '/rep-quote': typeof RepQuoteRoute
+  '/settings': typeof SettingsRoute
   '/upload-bom': typeof UploadBomRoute
   '/versions': typeof VersionsRoute
 }
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
   '/rep-quote': typeof RepQuoteRoute
+  '/settings': typeof SettingsRoute
   '/upload-bom': typeof UploadBomRoute
   '/versions': typeof VersionsRoute
 }
@@ -114,6 +122,7 @@ export interface FileRoutesById {
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
   '/rep-quote': typeof RepQuoteRoute
+  '/settings': typeof SettingsRoute
   '/upload-bom': typeof UploadBomRoute
   '/versions': typeof VersionsRoute
 }
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/project'
     | '/quality'
     | '/rep-quote'
+    | '/settings'
     | '/upload-bom'
     | '/versions'
   fileRoutesByTo: FileRoutesByTo
@@ -142,6 +152,7 @@ export interface FileRouteTypes {
     | '/project'
     | '/quality'
     | '/rep-quote'
+    | '/settings'
     | '/upload-bom'
     | '/versions'
   id:
@@ -155,6 +166,7 @@ export interface FileRouteTypes {
     | '/project'
     | '/quality'
     | '/rep-quote'
+    | '/settings'
     | '/upload-bom'
     | '/versions'
   fileRoutesById: FileRoutesById
@@ -169,6 +181,7 @@ export interface RootRouteChildren {
   ProjectRoute: typeof ProjectRoute
   QualityRoute: typeof QualityRoute
   RepQuoteRoute: typeof RepQuoteRoute
+  SettingsRoute: typeof SettingsRoute
   UploadBomRoute: typeof UploadBomRoute
   VersionsRoute: typeof VersionsRoute
 }
@@ -187,6 +200,13 @@ declare module '@tanstack/react-router' {
       path: '/upload-bom'
       fullPath: '/upload-bom'
       preLoaderRoute: typeof UploadBomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/rep-quote': {
@@ -265,6 +285,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProjectRoute: ProjectRoute,
   QualityRoute: QualityRoute,
   RepQuoteRoute: RepQuoteRoute,
+  SettingsRoute: SettingsRoute,
   UploadBomRoute: UploadBomRoute,
   VersionsRoute: VersionsRoute,
 }
