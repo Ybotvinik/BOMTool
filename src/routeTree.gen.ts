@@ -15,6 +15,7 @@ import { Route as RepQuoteRouteImport } from './routes/rep-quote'
 import { Route as QualityRouteImport } from './routes/quality'
 import { Route as ProjectRouteImport } from './routes/project'
 import { Route as ChinaQuoteRouteImport } from './routes/china-quote'
+import { Route as ChangesRouteImport } from './routes/changes'
 import { Route as BomRouteImport } from './routes/bom'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -48,6 +49,11 @@ const ChinaQuoteRoute = ChinaQuoteRouteImport.update({
   path: '/china-quote',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChangesRoute = ChangesRouteImport.update({
+  id: '/changes',
+  path: '/changes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BomRoute = BomRouteImport.update({
   id: '/bom',
   path: '/bom',
@@ -62,6 +68,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
+  '/changes': typeof ChangesRoute
   '/china-quote': typeof ChinaQuoteRoute
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
+  '/changes': typeof ChangesRoute
   '/china-quote': typeof ChinaQuoteRoute
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/bom': typeof BomRoute
+  '/changes': typeof ChangesRoute
   '/china-quote': typeof ChinaQuoteRoute
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/bom'
+    | '/changes'
     | '/china-quote'
     | '/project'
     | '/quality'
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/bom'
+    | '/changes'
     | '/china-quote'
     | '/project'
     | '/quality'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/bom'
+    | '/changes'
     | '/china-quote'
     | '/project'
     | '/quality'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BomRoute: typeof BomRoute
+  ChangesRoute: typeof ChangesRoute
   ChinaQuoteRoute: typeof ChinaQuoteRoute
   ProjectRoute: typeof ProjectRoute
   QualityRoute: typeof QualityRoute
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChinaQuoteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/changes': {
+      id: '/changes'
+      path: '/changes'
+      fullPath: '/changes'
+      preLoaderRoute: typeof ChangesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bom': {
       id: '/bom'
       path: '/bom'
@@ -198,6 +218,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BomRoute: BomRoute,
+  ChangesRoute: ChangesRoute,
   ChinaQuoteRoute: ChinaQuoteRoute,
   ProjectRoute: ProjectRoute,
   QualityRoute: QualityRoute,
