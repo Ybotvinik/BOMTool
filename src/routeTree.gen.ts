@@ -9,16 +9,28 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VersionsRouteImport } from './routes/versions'
 import { Route as UploadBomRouteImport } from './routes/upload-bom'
+import { Route as RepQuoteRouteImport } from './routes/rep-quote'
 import { Route as QualityRouteImport } from './routes/quality'
 import { Route as ProjectRouteImport } from './routes/project'
 import { Route as ChinaQuoteRouteImport } from './routes/china-quote'
 import { Route as BomRouteImport } from './routes/bom'
 import { Route as IndexRouteImport } from './routes/index'
 
+const VersionsRoute = VersionsRouteImport.update({
+  id: '/versions',
+  path: '/versions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UploadBomRoute = UploadBomRouteImport.update({
   id: '/upload-bom',
   path: '/upload-bom',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RepQuoteRoute = RepQuoteRouteImport.update({
+  id: '/rep-quote',
+  path: '/rep-quote',
   getParentRoute: () => rootRouteImport,
 } as any)
 const QualityRoute = QualityRouteImport.update({
@@ -53,7 +65,9 @@ export interface FileRoutesByFullPath {
   '/china-quote': typeof ChinaQuoteRoute
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
+  '/rep-quote': typeof RepQuoteRoute
   '/upload-bom': typeof UploadBomRoute
+  '/versions': typeof VersionsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,7 +75,9 @@ export interface FileRoutesByTo {
   '/china-quote': typeof ChinaQuoteRoute
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
+  '/rep-quote': typeof RepQuoteRoute
   '/upload-bom': typeof UploadBomRoute
+  '/versions': typeof VersionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,7 +86,9 @@ export interface FileRoutesById {
   '/china-quote': typeof ChinaQuoteRoute
   '/project': typeof ProjectRoute
   '/quality': typeof QualityRoute
+  '/rep-quote': typeof RepQuoteRoute
   '/upload-bom': typeof UploadBomRoute
+  '/versions': typeof VersionsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,9 +98,19 @@ export interface FileRouteTypes {
     | '/china-quote'
     | '/project'
     | '/quality'
+    | '/rep-quote'
     | '/upload-bom'
+    | '/versions'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/bom' | '/china-quote' | '/project' | '/quality' | '/upload-bom'
+  to:
+    | '/'
+    | '/bom'
+    | '/china-quote'
+    | '/project'
+    | '/quality'
+    | '/rep-quote'
+    | '/upload-bom'
+    | '/versions'
   id:
     | '__root__'
     | '/'
@@ -90,7 +118,9 @@ export interface FileRouteTypes {
     | '/china-quote'
     | '/project'
     | '/quality'
+    | '/rep-quote'
     | '/upload-bom'
+    | '/versions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -99,16 +129,32 @@ export interface RootRouteChildren {
   ChinaQuoteRoute: typeof ChinaQuoteRoute
   ProjectRoute: typeof ProjectRoute
   QualityRoute: typeof QualityRoute
+  RepQuoteRoute: typeof RepQuoteRoute
   UploadBomRoute: typeof UploadBomRoute
+  VersionsRoute: typeof VersionsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/versions': {
+      id: '/versions'
+      path: '/versions'
+      fullPath: '/versions'
+      preLoaderRoute: typeof VersionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/upload-bom': {
       id: '/upload-bom'
       path: '/upload-bom'
       fullPath: '/upload-bom'
       preLoaderRoute: typeof UploadBomRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rep-quote': {
+      id: '/rep-quote'
+      path: '/rep-quote'
+      fullPath: '/rep-quote'
+      preLoaderRoute: typeof RepQuoteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/quality': {
@@ -155,8 +201,20 @@ const rootRouteChildren: RootRouteChildren = {
   ChinaQuoteRoute: ChinaQuoteRoute,
   ProjectRoute: ProjectRoute,
   QualityRoute: QualityRoute,
+  RepQuoteRoute: RepQuoteRoute,
   UploadBomRoute: UploadBomRoute,
+  VersionsRoute: VersionsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
