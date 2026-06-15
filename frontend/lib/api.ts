@@ -37,6 +37,29 @@ export async function apiPost<T>(
   return res.json() as Promise<T>;
 }
 
+export async function apiPatch<T>(
+  path: string,
+  body: unknown,
+  userId?: number,
+): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (userId != null) headers["X-User-Id"] = String(userId);
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) await parseError(res, path, "PATCH");
+  return res.json() as Promise<T>;
+}
+
+export async function apiDelete(path: string, userId?: number): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (userId != null) headers["X-User-Id"] = String(userId);
+  const res = await fetch(`${API_URL}${path}`, { method: "DELETE", headers });
+  if (!res.ok) await parseError(res, path, "DELETE");
+}
+
 export async function apiUpload<T>(
   path: string,
   file: File,
