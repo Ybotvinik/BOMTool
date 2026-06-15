@@ -320,14 +320,40 @@ function ChinaQuotePage() {
         <Kpi label="Est. Savings" value="$42,500" tone="good" />
       </div>
 
-      {/* Matching Results */}
+      {/* Matching Results & Procurement Decisions */}
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-sm bg-brand text-brand-foreground text-[10px] font-bold">3</span>
+          <h2 className="text-sm font-bold">תוצאות התאמה והחלטות רכש</h2>
+          <Badge variant="outline" className="h-4 px-1.5 text-[10px] bg-amber-100 text-amber-800 border-amber-400">
+            <ShieldAlert className="h-2.5 w-2.5 ml-0.5" /> INTERNAL
+          </Badge>
+        </div>
+        <span className="text-[10px] text-muted-foreground">לחץ על שורה לפתיחת חלונית החלטה</span>
+      </div>
+
+      {/* Decision summary panel */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-2">
+        <Kpi label="Recommended for China" value="121" tone="good" />
+        <Kpi label="Requiring Approval" value="14" tone="warn" />
+        <Kpi label="Keep Authorized Source" value="19" />
+        <Kpi label="To Requote" value="8" tone="bad" />
+        <Kpi label="Total Est. Savings" value="$42,500" tone="good" />
+        <Kpi label="Internal Cost (After)" value="$82,300" />
+      </div>
+
       <Card className="mb-3 py-0">
-        <CardHeader className="px-3 pt-2.5 pb-1.5 flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-[13px] flex items-center gap-1.5">
-            <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-brand text-brand-foreground text-[10px] font-bold">3</span>
-            תוצאות התאמה — China Quote ↔ Active BOM
-          </CardTitle>
-          <span className="text-[10px] text-muted-foreground">לחץ על שורה לפתיחת חלונית החלטה</span>
+        <CardHeader className="px-3 pt-2 pb-1.5 space-y-2">
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList className="h-7 p-0.5">
+              {tabs.map((t) => (
+                <TabsTrigger key={t.id} value={t.id} className="h-6 text-[11px] px-2">
+                  {t.label}
+                  <span className="mr-1 inline-flex h-3.5 min-w-[18px] items-center justify-center rounded-sm bg-muted px-1 text-[9px] tabular-nums">{t.count}</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
@@ -353,18 +379,27 @@ function ChinaQuotePage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => {
+              {filteredRows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={17} className="text-center text-xs text-muted-foreground py-6">
+                    אין שורות תואמות במסנן זה
+                  </TableCell>
+                </TableRow>
+              )}
+              {filteredRows.map((r) => {
                 const savingUnit = r.chinaUnit != null ? r.custUnit - r.chinaUnit : null;
                 const savingTotal = savingUnit != null ? savingUnit * r.requiredQty : null;
+                const moqIssue = r.moq > 0 && r.moq > r.requiredQty;
+                const leadIssue = /1[2-9]w|[2-9]\dw/.test(r.leadTime);
                 return (
                   <TableRow
                     key={r.line}
-                    className="cursor-pointer hover:bg-muted/40"
+                    className={`cursor-pointer hover:bg-muted/40 ${r.match === "Not Matched" ? "bg-risk-critical/5" : r.match === "Alternative Suggested" ? "bg-amber-50/40" : ""}`}
                     onClick={() => setOpenRow(r)}
                   >
                     <TableCell className="text-right tabular-nums text-[11px]">{r.line}</TableCell>
                     <TableCell className="font-mono text-[11px]">{r.bomMpn}</TableCell>
-                    <TableCell className="font-mono text-[11px]">{r.quoteMpn}</TableCell>
+                    <TableCell className={`font-mono text-[11px] ${r.match === "Not Matched" ? "text-risk-critical" : ""}`}>{r.quoteMpn}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={`h-4 px-1.5 text-[10px] ${matchCls[r.match]}`}>{r.match}</Badge>
                     </TableCell>
@@ -374,19 +409,19 @@ function ChinaQuotePage() {
                     <TableCell className="text-right tabular-nums text-[11px]">{r.chinaUnit != null ? `$${r.chinaUnit.toFixed(2)}` : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums text-[11px]">
                       {savingTotal != null ? (
-                        <span className={savingTotal >= 0 ? "text-risk-low font-semibold" : "text-risk-critical"}>
-                          ${savingTotal.toFixed(0)}
+                        <span className={savingTotal > 0 ? "text-risk-low font-semibold" : savingTotal < 0 ? "text-risk-critical" : ""}>
+                          {savingTotal > 0 ? "+" : ""}${Math.abs(savingTotal).toFixed(0)}
                         </span>
-                      ) : "—"}
+                      ) : <span className="text-risk-critical">—</span>}
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-[11px]">{r.requiredQty.toLocaleString()}</TableCell>
                     <TableCell className="text-right tabular-nums text-[11px]">
                       {r.availableQty > 0 ? r.availableQty.toLocaleString() : <span className="text-risk-critical">0</span>}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums text-[11px]">{r.moq || "—"}</TableCell>
-                    <TableCell className="text-[11px]">{r.leadTime}</TableCell>
+                    <TableCell className={`text-right tabular-nums text-[11px] ${moqIssue ? "text-amber-700 font-semibold" : ""}`}>{r.moq || "—"}</TableCell>
+                    <TableCell className={`text-[11px] ${leadIssue ? "text-amber-700 font-semibold" : ""}`}>{r.leadTime}</TableCell>
                     <TableCell className="text-[11px]">{r.validUntil}</TableCell>
-                    <TableCell className="font-mono text-[11px]">{r.altPn}</TableCell>
+                    <TableCell className={`font-mono text-[11px] ${r.altPn !== "—" ? "text-amber-700" : ""}`}>{r.altPn}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={`h-4 px-1.5 text-[10px] ${riskCls[r.risk]}`}>{r.risk}</Badge>
                     </TableCell>
@@ -407,6 +442,29 @@ function ChinaQuotePage() {
               })}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      {/* Bottom action bar */}
+      <Card className="mb-3 py-0">
+        <CardContent className="px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[11px] text-muted-foreground">
+            <span className="font-semibold text-foreground">{filteredRows.length}</span> שורות מוצגות · החלטות פנימיות נשמרות ב-Pricing Snapshot
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+              <Send className="h-3.5 w-3.5 ml-1" /> שלח שורות לבדיקה
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+              <FileDown className="h-3.5 w-3.5 ml-1" /> ייצוא דוח רכש פנימי
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+              <Camera className="h-3.5 w-3.5 ml-1" /> צור Pricing Snapshot
+            </Button>
+            <Button size="sm" className="h-7 px-2 text-xs" style={{ background: "var(--gradient-brand)" }} onClick={() => setImported(true)}>
+              <CheckSquare className="h-3.5 w-3.5 ml-1" /> אשר מחירי סין שנבחרו
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -435,6 +493,7 @@ function ChinaQuotePage() {
           </CardContent>
         </Card>
       )}
+
 
       {/* Footer note */}
       <Alert className="py-2 border-brand/30 bg-brand/5">
