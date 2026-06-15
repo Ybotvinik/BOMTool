@@ -16,9 +16,10 @@ import {
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Upload, FileSpreadsheet, CheckCircle2, X, Sparkles, Lock, ShieldAlert,
-  Calculator, Filter, FileDown, ArrowLeftRight, Info,
+  Calculator, Filter, FileDown, ArrowLeftRight, Info, Send, Camera, CheckSquare,
 } from "lucide-react";
 
 export const Route = createFileRoute("/china-quote")({
