@@ -21,6 +21,7 @@ import { Route as ExportRouteImport } from './routes/export'
 import { Route as ChinaQuoteRouteImport } from './routes/china-quote'
 import { Route as ChangesRouteImport } from './routes/changes'
 import { Route as BomRouteImport } from './routes/bom'
+import { Route as AuditLogRouteImport } from './routes/audit-log'
 import { Route as IndexRouteImport } from './routes/index'
 
 const VersionsRoute = VersionsRouteImport.update({
@@ -83,6 +84,11 @@ const BomRoute = BomRouteImport.update({
   path: '/bom',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuditLogRoute = AuditLogRouteImport.update({
+  id: '/audit-log',
+  path: '/audit-log',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -91,6 +97,7 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/audit-log': typeof AuditLogRoute
   '/bom': typeof BomRoute
   '/changes': typeof ChangesRoute
   '/china-quote': typeof ChinaQuoteRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/audit-log': typeof AuditLogRoute
   '/bom': typeof BomRoute
   '/changes': typeof ChangesRoute
   '/china-quote': typeof ChinaQuoteRoute
@@ -122,6 +130,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/audit-log': typeof AuditLogRoute
   '/bom': typeof BomRoute
   '/changes': typeof ChangesRoute
   '/china-quote': typeof ChinaQuoteRoute
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/audit-log'
     | '/bom'
     | '/changes'
     | '/china-quote'
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/audit-log'
     | '/bom'
     | '/changes'
     | '/china-quote'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/audit-log'
     | '/bom'
     | '/changes'
     | '/china-quote'
@@ -185,6 +197,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuditLogRoute: typeof AuditLogRoute
   BomRoute: typeof BomRoute
   ChangesRoute: typeof ChangesRoute
   ChinaQuoteRoute: typeof ChinaQuoteRoute
@@ -285,6 +298,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BomRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/audit-log': {
+      id: '/audit-log'
+      path: '/audit-log'
+      fullPath: '/audit-log'
+      preLoaderRoute: typeof AuditLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -297,6 +317,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuditLogRoute: AuditLogRoute,
   BomRoute: BomRoute,
   ChangesRoute: ChangesRoute,
   ChinaQuoteRoute: ChinaQuoteRoute,
