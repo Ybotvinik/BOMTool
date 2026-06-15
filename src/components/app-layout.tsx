@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { navItems } from "@/lib/mock-data";
-import { Cpu, Search, Bell, Lock } from "lucide-react";
+import { Search, Bell, Lock } from "lucide-react";
+import glintechLogo from "@/assets/glintech-logo.png.asset.json";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
