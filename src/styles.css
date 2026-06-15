@@ -167,3 +167,19 @@
   --color-risk-obsolete: var(--risk-obsolete);
 }
 
+/* Compact Desktop Mode */
+@layer base {
+  table { font-size: 12px; }
+  thead th {
+    height: 32px !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  tbody td {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+  }
+}
+
