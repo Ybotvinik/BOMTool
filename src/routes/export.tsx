@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { bomLines } from "@/lib/mock-data";
+import glintechLogo from "@/assets/glintech-logo.png.asset.json";
 import {
   FileSpreadsheet, FileText, Cloud, ShieldCheck, ShieldAlert, Lock,
   Eye, Save, ArrowUp, ArrowDown, FolderOpen, Download, Copy, CheckCircle2,
