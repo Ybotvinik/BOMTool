@@ -116,6 +116,29 @@ function ChinaQuotePage() {
   const [uploaded, setUploaded] = useState(true);
   const [imported, setImported] = useState(false);
   const [openRow, setOpenRow] = useState<Row | null>(null);
+  const [tab, setTab] = useState<string>("all");
+
+  const filteredRows = rows.filter((r) => {
+    if (tab === "all") return true;
+    if (tab === "exact") return r.match === "Exact Match";
+    if (tab === "review") return r.match === "Needs Review";
+    if (tab === "alt") return r.match === "Alternative Suggested";
+    if (tab === "moq") return r.moq > 0 && r.moq > r.requiredQty;
+    if (tab === "lead") return /1[2-9]w|[2-9]\dw/.test(r.leadTime);
+    if (tab === "nomatch") return r.match === "Not Matched";
+    return true;
+  });
+
+  const tabs: { id: string; label: string; count: number }[] = [
+    { id: "all", label: "כל השורות", count: rows.length },
+    { id: "exact", label: "Exact Match", count: rows.filter(r => r.match === "Exact Match").length },
+    { id: "review", label: "Needs Review", count: rows.filter(r => r.match === "Needs Review").length },
+    { id: "alt", label: "Alternatives", count: rows.filter(r => r.match === "Alternative Suggested").length },
+    { id: "moq", label: "MOQ Issues", count: rows.filter(r => r.moq > 0 && r.moq > r.requiredQty).length },
+    { id: "lead", label: "Lead Time Issues", count: rows.filter(r => /1[2-9]w|[2-9]\dw/.test(r.leadTime)).length },
+    { id: "nomatch", label: "Not Matched", count: rows.filter(r => r.match === "Not Matched").length },
+  ];
+
 
   return (
     <AppLayout>
