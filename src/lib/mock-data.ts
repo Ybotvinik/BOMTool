@@ -115,6 +115,7 @@ import {
   FileDown,
   FolderTree,
   Settings,
+  ShoppingCart,
 } from "lucide-react";
 
 export const navItems = [
@@ -129,5 +130,6 @@ export const navItems = [
   { to: "/changes", label: "השוואת שינויים", icon: GitCompare },
   { to: "/export", label: "דוחות וייצוא", icon: FileDown },
   { to: "/files", label: "קבצי פרויקט", icon: FolderTree },
+  { to: "/procurement-file", label: "קובץ רכש לספק", icon: ShoppingCart },
   { to: "/settings", label: "הגדרות", icon: Settings },
 ] as const;
