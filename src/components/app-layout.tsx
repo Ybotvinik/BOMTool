@@ -45,16 +45,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-11 border-b bg-background flex items-center justify-between px-4 gap-6">
-          <div className="flex items-center gap-2">
-            <div
-              className="h-6 w-6 rounded-md flex items-center justify-center text-white shadow-sm"
-              style={{ background: "var(--gradient-brand)" }}
-            >
-              <Cpu className="h-3 w-3" />
+        <header className="h-12 border-b bg-background flex items-center justify-between px-4 gap-6">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 px-1.5 rounded-md flex items-center bg-[var(--navy)]">
+              <img src={glintechLogo.url} alt="GlinTech" className="h-5 w-auto" style={{ maxWidth: 70 }} />
             </div>
             <div className="leading-tight">
-              <div className="text-[12.5px] font-semibold">GlinTech BOM Insight</div>
+              <div className="text-[12.5px] font-semibold text-[var(--navy)]">GlinTech BOM Insight</div>
               <div className="text-[10px] text-muted-foreground">מערכת ניתוח BOM, תמחור ורכש פנימית</div>
             </div>
           </div>
