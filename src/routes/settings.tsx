@@ -186,16 +186,16 @@ function Settings() {
                 { label: "Official Rep Quote", desc: "הצעות מחיר מנציגים רשמיים", defaultChecked: true },
                 { label: "Existing GlinTech Stock", desc: "מלאי קיים של גלינטק", defaultChecked: true },
               ].map((s) => (
-                <div key={s.label} className="flex items-center justify-between h-[40px]">
-                  <div className="text-right">
-                    <div className="text-[12px] font-medium text-[var(--navy)] leading-none">{s.label}</div>
-                    <div className="text-[10px] text-[#64748B] leading-none mt-0.5">{s.desc}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Switch id={`source-${s.label}`} defaultChecked={s.defaultChecked} />
+                <div key={s.label} className="flex flex-row-reverse items-center justify-between w-full px-3 py-2 box-border overflow-hidden h-[40px]">
+                  <div className="flex items-center gap-2 flex-shrink-0" style={{ width: 92 }}>
                     <span className={`text-[11px] font-medium ${s.defaultChecked ? "text-[var(--brand)]" : "text-[#64748B]"}`}>
                       {s.defaultChecked ? "פעיל" : "כבוי"}
                     </span>
+                    <Switch id={`source-${s.label}`} defaultChecked={s.defaultChecked} />
+                  </div>
+                  <div className="text-right flex-1 min-w-0">
+                    <div className="text-[12px] font-medium text-[var(--navy)] leading-none">{s.label}</div>
+                    <div className="text-[10px] text-[#64748B] leading-none mt-0.5">{s.desc}</div>
                   </div>
                 </div>
               ))}
