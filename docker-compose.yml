@@ -1,0 +1,52 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: glintech_db
+    environment:
+      POSTGRES_USER: glintech
+      POSTGRES_PASSWORD: glintech
+      POSTGRES_DB: glintech
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glintech -d glintech"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: glintech_backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://glintech:glintech@db:5432/glintech
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      LOCAL_STORAGE_DIR: /data/uploads
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - uploads_data:/data/uploads
+
+  frontend:
+    build: ./frontend
+    container_name: glintech_frontend
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  db_data:
+  uploads_data:
