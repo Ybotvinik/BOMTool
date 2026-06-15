@@ -120,10 +120,10 @@ function ProcurementFile() {
   };
 
   const history = [
-    { date: "2026-06-12", supplier: "China Buyer - Huaqiang HK", file: "PO_ELB-RCB-003_v4.3_China_2026-06-12.xlsx", bom: "v4.3", snap: "With China Quote", lines: 64, value: "$48,600", by: "Yossi Cohen" },
-    { date: "2026-06-08", supplier: "Digi-Key", file: "PO_ELB-RCB-003_v4.2_DigiKey_2026-06-08.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 41, value: "$62,140", by: "Yossi Cohen" },
-    { date: "2026-06-02", supplier: "Mouser", file: "PO_ELB-RCB-003_v4.2_Mouser_2026-06-02.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 28, value: "$19,820", by: "Dana Levi" },
-    { date: "2026-05-22", supplier: "Official Rep - Avnet", file: "PO_ELB-RCB-003_v4.1_Avnet_2026-05-22.xlsx", bom: "v4.1", snap: "Internal Cost", lines: 7, value: "$11,300", by: "Yossi Cohen" },
+    { date: "2026-06-12", supplier: "China Buyer - Huaqiang HK", file: "ProcurementFile_ELB-RCB-003_v4.3_China_2026-06-12.xlsx", bom: "v4.3", snap: "With China Quote", lines: 64, value: "$48,600", by: "Yossi Cohen" },
+    { date: "2026-06-08", supplier: "Digi-Key", file: "ProcurementFile_ELB-RCB-003_v4.2_DigiKey_2026-06-08.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 41, value: "$62,140", by: "Yossi Cohen" },
+    { date: "2026-06-02", supplier: "Mouser", file: "ProcurementFile_ELB-RCB-003_v4.2_Mouser_2026-06-02.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 28, value: "$19,820", by: "Dana Levi" },
+    { date: "2026-05-22", supplier: "Official Rep - Avnet", file: "ProcurementFile_ELB-RCB-003_v4.1_Avnet_2026-05-22.xlsx", bom: "v4.1", snap: "Internal Cost", lines: 7, value: "$11,300", by: "Yossi Cohen" },
   ];
 
   return (
