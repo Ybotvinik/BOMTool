@@ -219,7 +219,7 @@ function ProcurementFile() {
       <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11.5px] text-amber-800">
         <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <div className="flex-1 leading-snug">
-          קובץ זה מיועד לעבודה פנימית של מנהל הרכש. מנהל הרכש יעבור על הכמויות וההערות ידנית לפני ביצוע הזמנה בפועל.
+          הקובץ אינו הזמנת רכש רשמית. מנהל הרכש בודק ומוציא הזמנה ידנית לפי הצורך.
         </div>
         <span className="text-[10px] font-semibold tracking-wider flex items-center gap-1"><Lock className="h-3 w-3" /> GLINTECH INTERNAL ONLY</span>
       </div>
@@ -331,7 +331,7 @@ function ProcurementFile() {
         <CardContent className="px-3 pb-3 pt-0">
           <SectionTitle title="Required Columns" />
           <div className="flex flex-wrap gap-1.5 mb-3">
-            {["MPN", "Manufacturer", "Supplier Part Number", "Order Qty", "Notes"].map((c) => (
+            {["MPN", "Manufacturer", "Supplier P/N", "Order Qty", "Notes"].map((c) => (
               <Badge key={c} className="text-[11px]">{c}</Badge>
             ))}
           </div>
