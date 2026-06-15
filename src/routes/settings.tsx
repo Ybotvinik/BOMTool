@@ -177,29 +177,52 @@ function Settings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">
-            <div className="divide-y divide-[#E2E8F0]">
-              {[
-                { label: "Digi-Key", desc: "מקור מחיר וזמינות רשמי/גלובלי", defaultChecked: true },
-                { label: "Mouser", desc: "מקור מחיר וזמינות רשמי/גלובלי", defaultChecked: true },
-                { label: "LCSC", desc: "מקור רכיבים מסין / מחיר שוק נוסף", defaultChecked: false },
-                { label: "China Buyer Quote", desc: "קובץ מחירים מהקניין בסין", defaultChecked: true },
-                { label: "Official Rep Quote", desc: "הצעות מחיר מנציגים רשמיים", defaultChecked: true },
-                { label: "Existing GlinTech Stock", desc: "מלאי קיים של גלינטק", defaultChecked: true },
-              ].map((s) => (
-                <div key={s.label} className="flex flex-row-reverse items-center justify-between w-full px-3 py-2 box-border overflow-hidden h-[40px]">
-                  <div className="flex items-center gap-2 flex-shrink-0" style={{ width: 92 }}>
-                    <span className={`text-[11px] font-medium ${s.defaultChecked ? "text-[var(--brand)]" : "text-[#64748B]"}`}>
-                      {s.defaultChecked ? "פעיל" : "כבוי"}
-                    </span>
-                    <Switch id={`source-${s.label}`} defaultChecked={s.defaultChecked} />
-                  </div>
-                  <div className="text-right flex-1 min-w-0">
-                    <div className="text-[12px] font-medium text-[var(--navy)] leading-none">{s.label}</div>
-                    <div className="text-[10px] text-[#64748B] leading-none mt-0.5">{s.desc}</div>
-                  </div>
-                </div>
-              ))}
+            {/* Table header */}
+            <div className="flex items-center border-b border-[#E2E8F0] px-3 h-8">
+              <div className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wide w-[72px] text-center">פעולה</div>
+              <div className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wide w-[64px] text-center">סטטוס</div>
+              <div className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wide flex-1 text-right pr-2">תיאור</div>
+              <div className="text-[10px] font-semibold text-[#64748B] uppercase tracking-wide w-[120px] text-right">מקור</div>
             </div>
+            {/* Table rows */}
+            {[
+              { source: "Digi-Key", desc: "מקור מחיר וזמינות רשמי/גלובלי", active: true },
+              { source: "Mouser", desc: "מקור מחיר וזמינות רשמי/גלובלי", active: true },
+              { source: "LCSC", desc: "מקור רכיבים מסין / מחיר שוק נוסף", active: false },
+              { source: "China Buyer Quote", desc: "קובץ מחירים מהקניין בסין", active: true },
+              { source: "Official Rep Quote", desc: "הצעות מחיר מנציגים רשמיים", active: true },
+              { source: "Existing GlinTech Stock", desc: "מלאי קיים של גלינטק", active: true },
+            ].map((row) => (
+              <div
+                key={row.source}
+                className="flex items-center border-b border-[#E2E8F0] last:border-b-0 px-3 h-[36px] hover:bg-[#F8FAFC] transition-colors"
+              >
+                <div className="w-[72px] flex justify-center">
+                  {row.active ? (
+                    <Button variant="secondary" size="sm" className="h-6 px-2 text-[10px]">
+                      כבה
+                    </Button>
+                  ) : (
+                    <Button variant="brand" size="sm" className="h-6 px-2 text-[10px]">
+                      הפעל
+                    </Button>
+                  )}
+                </div>
+                <div className="w-[64px] flex justify-center">
+                  {row.active ? (
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#E8F7ED] text-[#1A7A3E]">
+                      פעיל
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold bg-[#F1F5F9] text-[#64748B]">
+                      כבוי
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 text-right pr-2 text-[11px] text-[#64748B] truncate">{row.desc}</div>
+                <div className="w-[120px] text-right text-[12px] font-medium text-[var(--navy)] truncate">{row.source}</div>
+              </div>
+            ))}
             <div className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-700 mt-0.5 shrink-0" />
               <p className="text-[11px] text-amber-700 leading-snug">
