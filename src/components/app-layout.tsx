@@ -47,8 +47,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b bg-background flex items-center justify-between px-4 gap-6">
           <div className="leading-tight">
-            <div className="text-[13px] font-semibold text-[var(--navy)] tracking-tight">GlinTech BOM Insight</div>
-            <div className="text-[10px] text-muted-foreground">מערכת ניתוח BOM, תמחור ורכש פנימית</div>
+            <div className="text-[14px] font-bold text-[var(--navy)] tracking-tight">GlinTech BOM Insight</div>
+            <div className="text-[10.5px] text-muted-foreground mt-0.5">מערכת ניתוח BOM, תמחור ורכש פנימית</div>
           </div>
           <div className="flex items-center gap-2.5">
             <button className="h-7 w-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
