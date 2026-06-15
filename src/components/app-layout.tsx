@@ -10,12 +10,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     <div dir="rtl" className="min-h-screen flex bg-muted/30 text-foreground">
       {/* Sidebar (right in RTL) */}
       <aside className="w-52 shrink-0 border-l bg-sidebar text-sidebar-foreground flex flex-col">
-        <div className="h-14 flex items-center gap-2.5 px-3 border-b bg-[var(--navy)]">
+        <div className="h-14 flex items-center justify-center px-3 border-b bg-[var(--navy)]">
           <img
             src={glintechLogo.url}
             alt="GlinTech"
-            className="h-8 w-auto"
-            style={{ maxWidth: 120 }}
+            className="object-contain"
+            style={{ width: 140, height: 40 }}
           />
         </div>
         <nav className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
@@ -46,14 +46,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-12 border-b bg-background flex items-center justify-between px-4 gap-6">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 px-1.5 rounded-md flex items-center bg-[var(--navy)]">
-              <img src={glintechLogo.url} alt="GlinTech" className="h-5 w-auto" style={{ maxWidth: 70 }} />
-            </div>
-            <div className="leading-tight">
-              <div className="text-[12.5px] font-semibold text-[var(--navy)]">GlinTech BOM Insight</div>
-              <div className="text-[10px] text-muted-foreground">מערכת ניתוח BOM, תמחור ורכש פנימית</div>
-            </div>
+          <div className="leading-tight">
+            <div className="text-[13px] font-semibold text-[var(--navy)] tracking-tight">GlinTech BOM Insight</div>
+            <div className="text-[10px] text-muted-foreground">מערכת ניתוח BOM, תמחור ורכש פנימית</div>
           </div>
           <div className="flex items-center gap-2.5">
             <button className="h-7 w-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">

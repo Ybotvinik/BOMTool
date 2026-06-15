@@ -360,7 +360,7 @@ function ExportBuilder() {
           <CardContent className="p-0 overflow-auto">
             {includeLogo && (
               <div className="flex items-center justify-between gap-3 px-4 py-3 border-b bg-[var(--navy)] text-white">
-                <img src={glintechLogo.url} alt="GlinTech" className="h-9 w-auto" style={{ maxWidth: 140 }} />
+                <img src={glintechLogo.url} alt="GlinTech" className="object-contain" style={{ width: 200, height: 44 }} />
                 <div className="text-right leading-tight">
                   <div className="text-[13px] font-semibold tracking-wide">
                     {audience === "customer" ? "Customer Report" : "GLINTECH INTERNAL ONLY"}
