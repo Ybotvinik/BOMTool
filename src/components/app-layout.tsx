@@ -10,12 +10,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     <div dir="rtl" className="min-h-screen flex bg-muted/30 text-foreground">
       {/* Sidebar (right in RTL) */}
       <aside className="w-52 shrink-0 border-l bg-sidebar text-sidebar-foreground flex flex-col">
-        <div className="h-14 flex items-center gap-2.5 px-3 border-b bg-[var(--navy)]">
+        <div className="h-14 flex items-center justify-center px-3 border-b bg-[var(--navy)]">
           <img
             src={glintechLogo.url}
             alt="GlinTech"
-            className="h-8 w-auto"
-            style={{ maxWidth: 120 }}
+            className="object-contain"
+            style={{ width: 140, height: 40 }}
           />
         </div>
         <nav className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
