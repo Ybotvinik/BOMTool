@@ -2,7 +2,24 @@
 
 ## Cursor Cloud specific instructions
 
-GlinTech BOM Insight is a **frontend-only** single-page/SSR app (TanStack Start + React 19 + Vite 8, Tailwind v4). It uses **Bun** as the package manager (`bun.lock`, `bunfig.toml`); there is no backend, database, or external service — all data comes from `src/lib/mock-data.ts`. The UI is Hebrew (RTL).
+This repo now contains **two** GlinTech BOM Insight implementations:
+
+1. **Root Lovable/Vite prototype** (`/src`, `package.json`, `vite.config.ts`) — the original frontend-only design prototype (details below).
+2. **Full-stack MVP** in `/frontend` (Next.js) + `/backend` (FastAPI) + Postgres, orchestrated by `/docker-compose.yml` (the canonical app going forward).
+
+### Full-stack MVP (`/frontend`, `/backend`, `docker-compose.yml`)
+
+- **Run everything:** `docker compose up --build` from the repo root. Services: `db` (Postgres 16, port 5432), `backend` (FastAPI, http://localhost:8000, OpenAPI at `/docs`), `frontend` (Next.js dev, http://localhost:3000). Use `sudo docker compose ...` in the cloud VM.
+- **Docker in the cloud VM:** Docker is installed; the daemon uses the `fuse-overlayfs` storage driver and must be started with `sudo dockerd` if not already running (`sudo docker info` to check). iptables is set to `iptables-legacy`.
+- **Migrations + seed run automatically:** `backend/entrypoint.sh` waits for Postgres, runs `alembic upgrade head`, then `python -m app.seed`, then `uvicorn --reload`. To add a migration: `sudo docker compose exec backend alembic revision --autogenerate -m "msg"` (the file lands in `backend/alembic/versions/` via the bind mount; it may be root-owned — `chown` it before committing).
+- **entrypoint.sh gotcha:** the container CMD is `bash entrypoint.sh` (not `./entrypoint.sh`) because the `./backend` bind mount can drop the host file's execute bit.
+- **Mock auth:** the frontend sends the selected user id in the `X-User-Id` header; the backend attributes `activity_log` rows to it. No real auth in MVP.
+- **Activity logging:** all CRUD create/update/delete calls `app/services/activity.py::log_activity(...)`.
+- Backend has no test suite yet; verify via `curl localhost:8000/health` and the CRUD endpoints under `/api`.
+
+### Root Lovable/Vite prototype
+
+GlinTech BOM Insight (root) is a **frontend-only** single-page/SSR app (TanStack Start + React 19 + Vite 8, Tailwind v4). It uses **Bun** as the package manager (`bun.lock`, `bunfig.toml`); there is no backend, database, or external service — all data comes from `src/lib/mock-data.ts`. The UI is Hebrew (RTL).
 
 - **Package manager:** Use `bun`, not npm/yarn. `bun` is installed on `PATH` (also symlinked at `/usr/local/bin/bun`). The startup update script runs `bun install`.
 - **Dev server:** `bun run dev` serves on `http://localhost:8080/` (port/host are fixed by `@lovable.dev/vite-tanstack-config`, not the standard Vite 5173).
