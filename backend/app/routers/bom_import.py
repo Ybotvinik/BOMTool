@@ -28,6 +28,12 @@ from app.services.bom_parser import (
     suggest_mapping,
     suggest_version_name,
 )
+from app.services.bom_quality import (
+    clean_mpn,
+    compute_quality_summary,
+    compute_required_qty,
+    reanalyze_bom_version_quality,
+)
 from app.services.file_storage import get_file_storage
 
 router = APIRouter(prefix="/bom-import", tags=["bom_import"])
@@ -313,9 +319,11 @@ def commit_bom(
                 bom_version_id=version.id,
                 line_no=line_count,
                 mpn=mpn,
+                cleaned_mpn=clean_mpn(mpn),
                 manufacturer=cell(row, "manufacturer") or None,
                 description=cell(row, "description") or None,
                 quantity=qty if qty is not None else Decimal(0),
+                required_qty=compute_required_qty(qty, project.build_quantity, is_dnp),
                 reference_designators=cell(row, "reference_designators") or None,
                 footprint=cell(row, "footprint") or None,
                 value=cell(row, "value") or None,
@@ -337,12 +345,16 @@ def commit_bom(
         project.active_version_id = version.id
 
     db.flush()
+    # Auto-run quality analysis on the freshly imported lines.
+    analyzed = reanalyze_bom_version_quality(db, version.id)
+    quality_summary = compute_quality_summary(analyzed)
     log.info(
-        "BOM import done: bom_version_id=%s rows_inserted=%s skipped=%s active_version_id=%s",
+        "BOM import done: bom_version_id=%s rows_inserted=%s skipped=%s active_version_id=%s quality_score=%s",
         version.id,
         line_count,
         skipped,
         project.active_version_id,
+        quality_summary.get("quality_score"),
     )
     src_file = version.source_file_name or payload.file_path.split("/")[-1]
     log_activity(
@@ -391,4 +403,5 @@ def commit_bom(
         needs_review_count=needs_review,
         line_count=line_count,
         version_label=final_name,
+        quality_summary=quality_summary,
     )

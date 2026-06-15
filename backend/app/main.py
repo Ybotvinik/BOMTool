@@ -7,7 +7,9 @@ from app.routers import (
     bom_import,
     bom_lines,
     bom_versions,
+    china_quote,
     customers,
+    pricing,
     projects,
     users,
 )
@@ -43,4 +45,8 @@ app.include_router(projects.router, prefix=api)
 app.include_router(bom_versions.router, prefix=api)
 app.include_router(bom_lines.router, prefix=api)
 app.include_router(bom_import.router, prefix=api)
+app.include_router(china_quote.router, prefix=api)
+app.include_router(china_quote.project_router, prefix=api)
+app.include_router(pricing.router, prefix=api)
+app.include_router(pricing.project_router, prefix=api)
 app.include_router(activity_log.router, prefix=api)

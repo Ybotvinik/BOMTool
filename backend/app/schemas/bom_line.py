@@ -47,6 +47,26 @@ class BomLineUpdate(BaseModel):
     notes: str | None = None
 
 
+class BomLineEdit(BaseModel):
+    """Edit payload using the quality API field names (PCB/SMT semantics)."""
+
+    original_mpn: str | None = None
+    cleaned_mpn: str | None = None
+    manufacturer: str | None = None
+    original_description: str | None = None
+    qty_per_assembly: Decimal | None = None
+    reference_designators: str | None = None
+    footprint: str | None = None
+    value_text: str | None = None
+    is_dnp: bool | None = None
+    notes: str | None = None
+
+
 class BomLineRead(BomLineBase, ORMModel):
     id: int
     created_at: datetime
+    cleaned_mpn: str | None = None
+    required_qty: Decimal | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
+    quality_status: str = "ok"

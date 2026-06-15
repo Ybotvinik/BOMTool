@@ -43,6 +43,30 @@ class BomLine(Base):
         Boolean, nullable=False, default=False, server_default=text("false")
     )
     notes: Mapped[str | None] = mapped_column(Text)
+
+    # Cleaned MPN + required quantity (qty * build_quantity, 0 if DNP).
+    cleaned_mpn: Mapped[str | None] = mapped_column(String(120))
+    required_qty: Mapped[float | None] = mapped_column(Numeric(14, 4))
+
+    # Quality analysis results.
+    needs_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    review_reason: Mapped[str | None] = mapped_column(Text)
+    quality_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="ok", server_default="ok"
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )

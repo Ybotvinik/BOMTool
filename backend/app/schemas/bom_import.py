@@ -73,3 +73,4 @@ class BomImportResult(BaseModel):
     # Backwards-compatible aliases.
     line_count: int
     version_label: str
+    quality_summary: dict | None = None

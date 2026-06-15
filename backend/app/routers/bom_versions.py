@@ -12,6 +12,11 @@ from app.schemas.bom_version import (
     BomVersionUpdate,
 )
 from app.services.activity import log_activity
+from app.services.bom_quality import (
+    compute_quality_summary,
+    line_to_quality_dict,
+    reanalyze_bom_version_quality,
+)
 
 router = APIRouter(prefix="/bom-versions", tags=["bom_versions"])
 
@@ -37,6 +42,65 @@ def list_version_lines(version_id: int, db: Session = Depends(get_db)) -> list[B
         .order_by(BomLine.line_no, BomLine.id)
     )
     return list(db.scalars(stmt))
+
+
+def _version_lines(db: Session, version_id: int) -> list[BomLine]:
+    return list(
+        db.scalars(
+            select(BomLine)
+            .where(BomLine.bom_version_id == version_id)
+            .order_by(BomLine.line_no, BomLine.id)
+        )
+    )
+
+
+@router.get("/{version_id}/quality-summary")
+def quality_summary(version_id: int, db: Session = Depends(get_db)) -> dict:
+    version = db.get(BomVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="BOM version not found")
+    summary = compute_quality_summary(_version_lines(db, version_id))
+    return {"bom_version_id": version_id, **summary}
+
+
+@router.post("/{version_id}/reanalyze-quality")
+def reanalyze_quality(
+    version_id: int,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    version = db.get(BomVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="BOM version not found")
+    lines = reanalyze_bom_version_quality(db, version_id)
+    summary = compute_quality_summary(lines)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="bom_quality_reanalyzed",
+        project_id=version.project_id,
+        entity_type="bom_version",
+        entity_name=version.version_label,
+        change_summary=(
+            f"Re-analyzed quality for '{version.version_label}': "
+            f"score {summary['quality_score']}, {summary['error_count']} errors, "
+            f"{summary['warning_count']} warnings"
+        ),
+    )
+    return {"bom_version_id": version_id, **summary}
+
+
+@router.get("/{version_id}/quality-issues")
+def quality_issues(version_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    version = db.get(BomVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="BOM version not found")
+    issues = [
+        line_to_quality_dict(ln)
+        for ln in _version_lines(db, version_id)
+        if ln.needs_review or ln.quality_status != "ok"
+    ]
+    return issues
 
 
 @router.post("", response_model=BomVersionRead, status_code=status.HTTP_201_CREATED)

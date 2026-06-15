@@ -193,17 +193,16 @@ def _best_hint_score(col_norm: str, hints: list[str]) -> int:
     return best
 
 
-def suggest_mapping(columns: list[str]) -> dict[str, str | None]:
-    """Conflict-aware auto mapping of columns to BOM fields.
+def suggest_mapping_generic(
+    columns: list[str], field_hints: dict[str, list[str]]
+) -> dict[str, str | None]:
+    """Conflict-aware greedy mapping of columns to fields by hint score.
 
-    Builds (score, field, column) candidates and greedily assigns the highest
-    scoring pairs so that, e.g., "Manufacturer Part Number" beats "Manufacturer"
-    for MPN, and "Supplier Part Number" is claimed by supplier_part_number
-    rather than MPN. If no MPN column exists, supplier PN is used as a fallback.
+    Longer/more specific hints win; each column maps to at most one field.
     """
     cols = [(c, normalize_key(c)) for c in columns if c.strip()]
     pairs: list[tuple[int, str, str]] = []
-    for field, hints in FIELD_HINTS.items():
+    for field, hints in field_hints.items():
         for disp, cn in cols:
             score = _best_hint_score(cn, hints)
             if score > 0:
@@ -217,8 +216,13 @@ def suggest_mapping(columns: list[str]) -> dict[str, str | None]:
             continue
         assigned_field[field] = disp
         used_cols.add(disp)
+    return {f: assigned_field.get(f) for f in field_hints}
 
-    mapping: dict[str, str | None] = {f: assigned_field.get(f) for f in BOM_FIELDS}
+
+def suggest_mapping(columns: list[str]) -> dict[str, str | None]:
+    """Conflict-aware auto mapping of columns to BOM fields."""
+    mapping = suggest_mapping_generic(columns, FIELD_HINTS)
+    mapping = {f: mapping.get(f) for f in BOM_FIELDS}
     if mapping.get("mpn") is None and mapping.get("supplier_part_number"):
         mapping["mpn"] = mapping["supplier_part_number"]
     return mapping

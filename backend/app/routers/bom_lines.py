@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -5,8 +7,15 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user_id
 from app.models import BomLine, BomVersion
-from app.schemas.bom_line import BomLineCreate, BomLineRead, BomLineUpdate
+from app.schemas.bom_line import BomLineCreate, BomLineEdit, BomLineRead
 from app.services.activity import log_activity
+from app.services.bom_quality import (
+    clean_mpn,
+    compute_quality_summary,
+    compute_required_qty,
+    line_to_quality_dict,
+    reanalyze_bom_version_quality,
+)
 
 router = APIRouter(prefix="/bom-lines", tags=["bom_lines"])
 
@@ -56,30 +65,110 @@ def get_bom_line(line_id: int, db: Session = Depends(get_db)) -> BomLine:
     return line
 
 
-@router.patch("/{line_id}", response_model=BomLineRead)
+@router.patch("/{line_id}")
 def update_bom_line(
     line_id: int,
-    payload: BomLineUpdate,
+    payload: BomLineEdit,
     db: Session = Depends(get_db),
     user_id: int | None = Depends(get_current_user_id),
-) -> BomLine:
+) -> dict:
     line = db.get(BomLine, line_id)
     if line is None:
         raise HTTPException(status_code=404, detail="BOM line not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(line, field, value)
-    db.commit()
-    db.refresh(line)
+
+    data = payload.model_dump(exclude_unset=True)
+    changed: list[str] = []
+
+    # Map quality-API field names onto the model.
+    field_map = {
+        "original_mpn": "mpn",
+        "manufacturer": "manufacturer",
+        "original_description": "description",
+        "reference_designators": "reference_designators",
+        "footprint": "footprint",
+        "value_text": "value",
+        "is_dnp": "dnp",
+        "notes": "notes",
+    }
+    for api_field, model_field in field_map.items():
+        if api_field in data:
+            new_val = data[api_field]
+            if getattr(line, model_field) != new_val:
+                changed.append(api_field)
+            setattr(line, model_field, new_val)
+
+    if "qty_per_assembly" in data:
+        if line.quantity != data["qty_per_assembly"]:
+            changed.append("qty_per_assembly")
+        line.quantity = data["qty_per_assembly"]
+
+    # Recalculate cleaned_mpn (unless explicitly provided).
+    if "cleaned_mpn" in data and data["cleaned_mpn"] is not None:
+        line.cleaned_mpn = clean_mpn(data["cleaned_mpn"])
+    elif "original_mpn" in data:
+        line.cleaned_mpn = clean_mpn(line.mpn)
+
+    version = db.get(BomVersion, line.bom_version_id)
+    build_qty = version.build_quantity if version else None
+    line.required_qty = compute_required_qty(line.quantity, build_qty, line.dnp)
+
+    db.flush()
+    # Re-run quality for the full version (duplicate context may change).
+    analyzed = reanalyze_bom_version_quality(db, line.bom_version_id)
+    summary = compute_quality_summary(analyzed)
+
     log_activity(
         db,
         user_id=user_id,
-        action_type="bom_line.update",
-        project_id=_project_id_for_version(db, line.bom_version_id),
+        action_type="bom_line_updated",
+        project_id=version.project_id if version else None,
         entity_type="bom_line",
         entity_name=line.mpn,
-        change_summary=f"Updated BOM line '{line.mpn}'",
+        change_summary=(
+            f"Updated BOM line #{line.line_no} ({line.mpn or '—'}); "
+            f"changed: {', '.join(changed) if changed else 'none'}"
+        ),
+        commit=False,
     )
-    return line
+    db.commit()
+    db.refresh(line)
+    return {
+        "line": line_to_quality_dict(line),
+        "quality_summary": {"bom_version_id": line.bom_version_id, **summary},
+    }
+
+
+@router.post("/{line_id}/mark-reviewed")
+def mark_reviewed(
+    line_id: int,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    line = db.get(BomLine, line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="BOM line not found")
+    if line.quality_status == "error":
+        raise HTTPException(
+            status_code=409,
+            detail="לא ניתן לסמן כנבדק כל עוד קיימת שגיאה קריטית בשורה",
+        )
+    line.needs_review = False
+    line.reviewed_at = datetime.now(timezone.utc)
+    line.reviewed_by_user_id = user_id
+    version = db.get(BomVersion, line.bom_version_id)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="bom_line_reviewed",
+        project_id=version.project_id if version else None,
+        entity_type="bom_line",
+        entity_name=line.mpn,
+        change_summary=f"Marked BOM line #{line.line_no} ({line.mpn or '—'}) as reviewed",
+        commit=False,
+    )
+    db.commit()
+    db.refresh(line)
+    return {"line": line_to_quality_dict(line)}
 
 
 @router.delete("/{line_id}", status_code=status.HTTP_204_NO_CONTENT)
