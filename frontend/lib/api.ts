@@ -102,3 +102,28 @@ export async function apiBomPreview<T>(opts: {
   if (!res.ok) await parseError(res, path, "POST");
   return res.json() as Promise<T>;
 }
+
+// China-quote preview (Excel upload + header detection + mapping).
+export async function apiChinaPreview<T>(opts: {
+  file?: File;
+  fileId?: string;
+  projectId?: number;
+  bomVersionId?: number;
+  headerRowIndex?: number;
+  sheetName?: string;
+  userId?: number;
+}): Promise<T> {
+  const path = "/api/china-quotes/upload-preview";
+  const form = new FormData();
+  if (opts.file) form.append("file", opts.file);
+  if (opts.fileId) form.append("file_id", opts.fileId);
+  if (opts.projectId != null) form.append("project_id", String(opts.projectId));
+  if (opts.bomVersionId != null) form.append("bom_version_id", String(opts.bomVersionId));
+  if (opts.headerRowIndex != null) form.append("header_row_index", String(opts.headerRowIndex));
+  if (opts.sheetName) form.append("sheet_name", opts.sheetName);
+  const headers: Record<string, string> = {};
+  if (opts.userId != null) headers["X-User-Id"] = String(opts.userId);
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form });
+  if (!res.ok) await parseError(res, path, "POST");
+  return res.json() as Promise<T>;
+}
