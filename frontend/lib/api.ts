@@ -10,6 +10,17 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function parseError(res: Response, path: string, method: string): Promise<never> {
+  let detail = "";
+  try {
+    const data = await res.json();
+    detail = typeof data?.detail === "string" ? `: ${data.detail}` : "";
+  } catch {
+    /* ignore */
+  }
+  throw new Error(`${method} ${path} failed (${res.status})${detail}`);
+}
+
 export async function apiPost<T>(
   path: string,
   body: unknown,
@@ -22,6 +33,24 @@ export async function apiPost<T>(
     headers,
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`POST ${path} failed: ${res.status}`);
+  if (!res.ok) await parseError(res, path, "POST");
+  return res.json() as Promise<T>;
+}
+
+export async function apiUpload<T>(
+  path: string,
+  file: File,
+  userId?: number,
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (userId != null) headers["X-User-Id"] = String(userId);
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  if (!res.ok) await parseError(res, path, "POST");
   return res.json() as Promise<T>;
 }

@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.routers import (
     activity_log,
+    bom_import,
     bom_lines,
     bom_versions,
     customers,
@@ -41,4 +42,5 @@ app.include_router(customers.router, prefix=api)
 app.include_router(projects.router, prefix=api)
 app.include_router(bom_versions.router, prefix=api)
 app.include_router(bom_lines.router, prefix=api)
+app.include_router(bom_import.router, prefix=api)
 app.include_router(activity_log.router, prefix=api)
