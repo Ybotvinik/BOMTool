@@ -177,20 +177,26 @@ function Settings() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 pt-0">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            <div className="divide-y divide-[#E2E8F0]">
               {[
-                { label: "Digi-Key", defaultChecked: true },
-                { label: "Mouser", defaultChecked: true },
-                { label: "LCSC", defaultChecked: true },
-                { label: "Official Rep Quote", defaultChecked: true },
-                { label: "China Buyer Quote", defaultChecked: true },
-                { label: "Existing GlinTech Stock", defaultChecked: false },
+                { label: "Digi-Key", desc: "מקור מחיר וזמינות רשמי/גלובלי", defaultChecked: true },
+                { label: "Mouser", desc: "מקור מחיר וזמינות רשמי/גלובלי", defaultChecked: true },
+                { label: "LCSC", desc: "מקור רכיבים מסין / מחיר שוק נוסף", defaultChecked: false },
+                { label: "China Buyer Quote", desc: "קובץ מחירים מהקניין בסין", defaultChecked: true },
+                { label: "Official Rep Quote", desc: "הצעות מחיר מנציגים רשמיים", defaultChecked: true },
+                { label: "Existing GlinTech Stock", desc: "מלאי קיים של גלינטק", defaultChecked: true },
               ].map((s) => (
-                <div key={s.label} className="flex items-center justify-between h-8">
-                  <Label className="text-[12px] cursor-pointer" htmlFor={`source-${s.label}`}>
-                    {s.label}
-                  </Label>
-                  <Switch id={`source-${s.label}`} defaultChecked={s.defaultChecked} />
+                <div key={s.label} className="flex items-center justify-between h-[40px]">
+                  <div className="text-right">
+                    <div className="text-[12px] font-medium text-[var(--navy)] leading-none">{s.label}</div>
+                    <div className="text-[10px] text-[#64748B] leading-none mt-0.5">{s.desc}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch id={`source-${s.label}`} defaultChecked={s.defaultChecked} />
+                    <span className={`text-[11px] font-medium ${s.defaultChecked ? "text-[var(--brand)]" : "text-[#64748B]"}`}>
+                      {s.defaultChecked ? "פעיל" : "כבוי"}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
