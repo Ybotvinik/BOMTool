@@ -1,7 +1,16 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { navItems } from "@/lib/mock-data";
-import { Search, Bell, Lock } from "lucide-react";
+import { Search, Bell, Lock, ChevronDown, Check, Info } from "lucide-react";
 import glintechLogo from "@/assets/glintech-logo.png.asset.json";
+import { useCurrentUser } from "@/lib/current-user";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -59,13 +68,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="absolute top-1 left-1 h-1.5 w-1.5 rounded-full bg-risk-critical" />
             </button>
             <div className="h-5 w-px bg-border" />
-            <div className="text-right leading-tight">
-              <div className="text-[11px] font-medium">Yossi Cohen</div>
-              <div className="text-[10px] text-muted-foreground">Procurement</div>
-            </div>
-            <div className="h-7 w-7 rounded-full bg-brand text-brand-foreground flex items-center justify-center text-[11px] font-semibold">
-              YC
-            </div>
+            <UserSelector />
           </div>
         </header>
         <main className="flex-1 overflow-auto p-3">{children}</main>
@@ -77,5 +80,57 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </footer>
       </div>
     </div>
+  );
+}
+
+function UserSelector() {
+  const { user, setUser, users } = useCurrentUser();
+  const tip =
+    "המשתמש הפעיל משמש לתיעוד פעולות במערכת. במימוש אמיתי המשתמש יזוהה באמצעות Google Workspace.";
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          title={tip}
+          className="flex items-center gap-2 h-8 px-1.5 rounded-md hover:bg-muted transition-colors"
+        >
+          <div className="h-7 w-7 rounded-full bg-brand text-brand-foreground flex items-center justify-center text-[11px] font-semibold">
+            {user.initials}
+          </div>
+          <div className="text-right leading-tight">
+            <div className="text-[11px] font-medium text-foreground">{user.name}</div>
+            <div className="text-[9.5px] text-muted-foreground">משתמש פעיל</div>
+          </div>
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">
+          החלפת משתמש פעיל
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {users.map((u) => {
+          const active = u.name === user.name;
+          return (
+            <DropdownMenuItem
+              key={u.name}
+              onClick={() => setUser(u)}
+              className="text-[12px] flex items-center gap-2"
+            >
+              <div className="h-6 w-6 rounded-full bg-brand/10 text-brand flex items-center justify-center text-[10px] font-semibold">
+                {u.initials}
+              </div>
+              <span className="flex-1 text-right">{u.name}</span>
+              {active && <Check className="h-3.5 w-3.5 text-brand" />}
+            </DropdownMenuItem>
+          );
+        })}
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5 text-[10.5px] text-muted-foreground leading-snug flex gap-1.5">
+          <Info className="h-3 w-3 mt-0.5 shrink-0" />
+          <span>{tip}</span>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
