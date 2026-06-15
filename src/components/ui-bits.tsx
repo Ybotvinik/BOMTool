@@ -7,7 +7,7 @@ export function Kpi({
   tone = "default",
 }: {
   label: string;
-  value: string | number;
+  value: React.ReactNode;
   hint?: string;
   tone?: "default" | "good" | "warn" | "bad";
 }) {
