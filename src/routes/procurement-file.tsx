@@ -120,10 +120,10 @@ function ProcurementFile() {
   };
 
   const history = [
-    { date: "2026-06-12", supplier: "China Buyer - Huaqiang HK", file: "PO_ELB-RCB-003_v4.3_China_2026-06-12.xlsx", bom: "v4.3", snap: "With China Quote", lines: 64, value: "$48,600", by: "Yossi Cohen" },
-    { date: "2026-06-08", supplier: "Digi-Key", file: "PO_ELB-RCB-003_v4.2_DigiKey_2026-06-08.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 41, value: "$62,140", by: "Yossi Cohen" },
-    { date: "2026-06-02", supplier: "Mouser", file: "PO_ELB-RCB-003_v4.2_Mouser_2026-06-02.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 28, value: "$19,820", by: "Dana Levi" },
-    { date: "2026-05-22", supplier: "Official Rep - Avnet", file: "PO_ELB-RCB-003_v4.1_Avnet_2026-05-22.xlsx", bom: "v4.1", snap: "Internal Cost", lines: 7, value: "$11,300", by: "Yossi Cohen" },
+    { date: "2026-06-12", supplier: "China Buyer - Huaqiang HK", file: "ProcurementFile_ELB-RCB-003_v4.3_China_2026-06-12.xlsx", bom: "v4.3", snap: "With China Quote", lines: 64, value: "$48,600", by: "Yossi Cohen" },
+    { date: "2026-06-08", supplier: "Digi-Key", file: "ProcurementFile_ELB-RCB-003_v4.2_DigiKey_2026-06-08.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 41, value: "$62,140", by: "Yossi Cohen" },
+    { date: "2026-06-02", supplier: "Mouser", file: "ProcurementFile_ELB-RCB-003_v4.2_Mouser_2026-06-02.xlsx", bom: "v4.2", snap: "Customer Pricing", lines: 28, value: "$19,820", by: "Dana Levi" },
+    { date: "2026-05-22", supplier: "Official Rep - Avnet", file: "ProcurementFile_ELB-RCB-003_v4.1_Avnet_2026-05-22.xlsx", bom: "v4.1", snap: "Internal Cost", lines: 7, value: "$11,300", by: "Yossi Cohen" },
   ];
 
   return (
@@ -219,7 +219,7 @@ function ProcurementFile() {
       <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11.5px] text-amber-800">
         <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
         <div className="flex-1 leading-snug">
-          קובץ זה מיועד לעבודה פנימית של מנהל הרכש. מנהל הרכש יעבור על הכמויות וההערות ידנית לפני ביצוע הזמנה בפועל.
+          הקובץ אינו הזמנת רכש רשמית. מנהל הרכש בודק ומוציא הזמנה ידנית לפי הצורך.
         </div>
         <span className="text-[10px] font-semibold tracking-wider flex items-center gap-1"><Lock className="h-3 w-3" /> GLINTECH INTERNAL ONLY</span>
       </div>
@@ -331,7 +331,7 @@ function ProcurementFile() {
         <CardContent className="px-3 pb-3 pt-0">
           <SectionTitle title="Required Columns" />
           <div className="flex flex-wrap gap-1.5 mb-3">
-            {["MPN", "Manufacturer", "Supplier Part Number", "Order Qty", "Notes"].map((c) => (
+            {["MPN", "Manufacturer", "Supplier P/N", "Order Qty", "Notes"].map((c) => (
               <Badge key={c} className="text-[11px]">{c}</Badge>
             ))}
           </div>
