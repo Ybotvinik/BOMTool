@@ -358,6 +358,21 @@ function ExportBuilder() {
             <Badge variant="outline" className="text-[10px]">8 שורות ראשונות · {selectedFields.length} עמודות</Badge>
           </CardHeader>
           <CardContent className="p-0 overflow-auto">
+            {includeLogo && (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b bg-[var(--navy)] text-white">
+                <img src={glintechLogo.url} alt="GlinTech" className="h-9 w-auto" style={{ maxWidth: 140 }} />
+                <div className="text-right leading-tight">
+                  <div className="text-[13px] font-semibold tracking-wide">
+                    {audience === "customer" ? "Customer Report" : "GLINTECH INTERNAL ONLY"}
+                  </div>
+                  <div className="text-[10px] text-white/70">
+                    {audience === "customer"
+                      ? "Customer Safe — sanitized export"
+                      : "Confidential — internal cost, China pricing & margins"}
+                  </div>
+                </div>
+              </div>
+            )}
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="bg-muted/50">
