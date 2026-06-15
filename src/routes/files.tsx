@@ -130,7 +130,7 @@ function ContextBar() {
     ["Project Code", "ELB-RCB-003"],
     ["Active BOM", "v4.3"],
     ["Pricing Snapshot", "With China Quote"],
-    ["Shared Drive", "GlinTech BOM Intelligence"],
+    ["Shared Drive", "GlinTech BOM Insight"],
   ];
   return (
     <Card className="mb-3 py-0">
