@@ -1,7 +1,16 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { navItems } from "@/lib/mock-data";
-import { Search, Bell, Lock } from "lucide-react";
+import { Search, Bell, Lock, ChevronDown, Check, Info } from "lucide-react";
 import glintechLogo from "@/assets/glintech-logo.png.asset.json";
+import { useCurrentUser } from "@/lib/current-user";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -59,13 +68,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="absolute top-1 left-1 h-1.5 w-1.5 rounded-full bg-risk-critical" />
             </button>
             <div className="h-5 w-px bg-border" />
-            <div className="text-right leading-tight">
-              <div className="text-[11px] font-medium">Yossi Cohen</div>
-              <div className="text-[10px] text-muted-foreground">Procurement</div>
-            </div>
-            <div className="h-7 w-7 rounded-full bg-brand text-brand-foreground flex items-center justify-center text-[11px] font-semibold">
-              YC
-            </div>
+            <UserSelector />
           </div>
         </header>
         <main className="flex-1 overflow-auto p-3">{children}</main>
