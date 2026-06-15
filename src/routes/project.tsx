@@ -22,7 +22,7 @@ const costByCategory = [
   { name: "ICs", customer: 64200, internal: 42800 },
   { name: "Passives", customer: 12400, internal: 7100 },
   { name: "Connectors", customer: 18600, internal: 13900 },
-  { name: "Electro-Mechanical", customer: 21300, internal: 14200 },
+  { name: "Electro-Mech.", customer: 21300, internal: 14200 },
   { name: "Others", customer: 8300, internal: 4300 },
 ];
 
@@ -42,6 +42,7 @@ const riskSummary = [
   { name: "Critical", value: 5, color: "var(--risk-critical)" },
   { name: "Obsolete", value: 2, color: "var(--risk-obsolete)" },
 ];
+const riskTotal = riskSummary.reduce((a, b) => a + b.value, 0);
 
 const topSavings = [
   { mpn: "STM32F407VGT6", mfr: "STMicroelectronics", cust: 8.42, intCost: 5.78, source: "China Buyer", risk: "Low" as const },
@@ -67,118 +68,117 @@ function ProjectOverview() {
         title="סקירת פרויקט"
         subtitle="Elbit Systems · Radar Control Board v3 · ELB-RCB-003"
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline"><Upload className="h-4 w-4 ml-1" />טעינת BOM חדש</Button>
-            <Button size="sm" variant="outline"><FileSpreadsheet className="h-4 w-4 ml-1" />טעינת מחירון סין</Button>
-            <Button size="sm" variant="outline"><FileText className="h-4 w-4 ml-1" />העלאת הצעת נציג רשמי</Button>
-            <Button size="sm" variant="outline"><GitCompare className="h-4 w-4 ml-1" />השוואת גרסאות</Button>
-            <Button size="sm" variant="outline"><FileDown className="h-4 w-4 ml-1" />ייצוא דוח לקוח</Button>
-            <Button size="sm"><FileDown className="h-4 w-4 ml-1" />ייצוא דוח פנימי</Button>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs"><Upload className="h-3.5 w-3.5 ml-1" />טעינת BOM חדש</Button>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs"><FileSpreadsheet className="h-3.5 w-3.5 ml-1" />טעינת מחירון סין</Button>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs"><FileText className="h-3.5 w-3.5 ml-1" />הצעת נציג רשמי</Button>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs"><GitCompare className="h-3.5 w-3.5 ml-1" />השוואת גרסאות</Button>
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs"><FileDown className="h-3.5 w-3.5 ml-1" />ייצוא דוח לקוח</Button>
+            <Button size="sm" className="h-7 px-2 text-xs"><FileDown className="h-3.5 w-3.5 ml-1" />ייצוא דוח פנימי</Button>
           </div>
         }
       />
 
-      {/* Project header card */}
-      <Card className="mb-6 overflow-hidden">
-        <div className="h-1" style={{ background: "var(--gradient-brand)" }} />
-        <CardContent className="p-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 text-sm">
-          <Info label="Customer" value="Elbit Systems" />
-          <Info label="Project Name" value="Radar Control Board v3" />
-          <Info label="Project Code" value="ELB-RCB-003" />
-          <Info label="Active BOM Version" value={<span className="font-mono">v4.2</span>} />
-          <Info label="Pricing Snapshot" value="With China Quote" />
-          <Info label="Status" value={<Badge variant="outline" className="bg-risk-medium/30 text-amber-700 border-risk-medium/50">In Review</Badge>} />
-          <Info label="Last Updated" value="15/06/2026" />
-          <Info label="Build Quantity" value="1,000 assemblies" />
+      {/* Row 1: compact info bar */}
+      <Card className="mb-3 py-0 overflow-hidden">
+        <div className="h-0.5" style={{ background: "var(--gradient-brand)" }} />
+        <CardContent className="px-4 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+          <InfoInline label="Customer" value="Elbit Systems" />
+          <InfoInline label="Project" value="Radar Control Board v3" />
+          <InfoInline label="Code" value="ELB-RCB-003" />
+          <InfoInline label="BOM" value={<span className="font-mono">v4.2</span>} />
+          <InfoInline label="Snapshot" value="With China Quote" />
+          <InfoInline label="Status" value={<Badge variant="outline" className="h-4 px-1.5 text-[10px] bg-risk-medium/30 text-amber-700 border-risk-medium/50">In Review</Badge>} />
+          <InfoInline label="Updated" value="15/06/2026" />
+          <InfoInline label="Qty" value="1,000 assemblies" />
         </CardContent>
       </Card>
 
-      {/* KPI sections */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        {/* Customer-facing */}
-        <Card className="border-emerald-200/60 bg-emerald-50/40">
-          <CardHeader className="pb-2 flex-row items-center justify-between">
-            <CardTitle className="text-xs uppercase tracking-wider text-emerald-700 flex items-center gap-2">
-              <Eye className="h-3.5 w-3.5" /> Customer-Facing
-            </CardTitle>
-            <Badge variant="outline" className="border-emerald-300 text-emerald-700 bg-emerald-100/60 text-[10px]">CUSTOMER SAFE</Badge>
-          </CardHeader>
-          <CardContent>
-            <div className="text-xs text-muted-foreground mb-1">Customer BOM Value</div>
-            <div className="text-3xl font-bold text-emerald-700">$124,800</div>
-            <div className="text-[11px] text-muted-foreground mt-1">Quoted price · 1,000 assemblies</div>
+      {/* Row 2: customer-safe + internal financial KPIs side by side */}
+      <div className="grid grid-cols-12 gap-2.5 mb-3">
+        <Card className="col-span-12 lg:col-span-4 border-emerald-200/70 bg-emerald-50/40 py-0">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold flex items-center gap-1">
+                <Eye className="h-3 w-3" /> Customer-Facing
+              </span>
+              <Badge variant="outline" className="h-4 px-1.5 border-emerald-300 text-emerald-700 bg-emerald-100/60 text-[9px]">CUSTOMER SAFE</Badge>
+            </div>
+            <div className="text-[11px] text-muted-foreground">Customer BOM Value</div>
+            <div className="text-[26px] font-bold text-emerald-700 leading-tight">$124,800</div>
+            <div className="text-[10px] text-muted-foreground">Quoted price · 1,000 assemblies</div>
           </CardContent>
         </Card>
 
-        {/* Internal */}
-        <Card className="lg:col-span-2 border-amber-300/60 bg-amber-50/30">
-          <CardHeader className="pb-2 flex-row items-center justify-between">
-            <CardTitle className="text-xs uppercase tracking-wider text-amber-800 flex items-center gap-2">
-              <Lock className="h-3.5 w-3.5" /> GlinTech Internal
-            </CardTitle>
-            <Badge variant="outline" className="border-amber-400 text-amber-800 bg-amber-100/70 text-[10px]">INTERNAL ONLY · DO NOT SHARE</Badge>
-          </CardHeader>
-          <CardContent className="grid grid-cols-3 gap-4">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Internal Procurement Cost</div>
-              <div className="text-2xl font-bold">$82,300</div>
+        <Card className="col-span-12 lg:col-span-8 border-amber-300/60 bg-amber-50/30 py-0">
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] uppercase tracking-wider text-amber-800 font-semibold flex items-center gap-1">
+                <Lock className="h-3 w-3" /> GlinTech Internal
+              </span>
+              <Badge variant="outline" className="h-4 px-1.5 border-amber-400 text-amber-800 bg-amber-100/70 text-[9px]">INTERNAL ONLY · DO NOT SHARE</Badge>
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Gross Delta</div>
-              <div className="text-2xl font-bold text-risk-low">+$42,500</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">Gross Margin</div>
-              <div className="text-2xl font-bold text-risk-low">34.1%</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-[11px] text-muted-foreground">Internal Procurement Cost</div>
+                <div className="text-[24px] font-bold leading-tight">$82,300</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">Gross Delta</div>
+                <div className="text-[24px] font-bold text-risk-low leading-tight">+$42,500</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-muted-foreground">Gross Margin</div>
+                <div className="text-[24px] font-bold text-risk-low leading-tight">34.1%</div>
+              </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Operational KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      {/* Row 3: operational KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-3">
         <Kpi label="Critical Parts" value="7" tone="bad" hint="Block production" />
         <Kpi label="Missing Stock" value="9" tone="warn" hint="Below required qty" />
         <Kpi label="EOL / Obsolete" value="2" tone="warn" hint="Lifecycle risk" />
         <Kpi label="Needs Review" value="14" tone="warn" hint="Manual check" />
-        <Kpi label="BOM Quality Score" value="87 / 100" tone="good" hint="Identification level" />
+        <Kpi label="BOM Quality Score" value={<bdi dir="ltr">87 / 100</bdi>} tone="good" hint="Identification level" />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-2 flex-row items-center justify-between">
-            <CardTitle className="text-sm">Customer Price vs Internal Cost — by Category</CardTitle>
-            <Badge variant="outline" className="border-amber-400 text-amber-800 bg-amber-100/70 text-[10px]">INTERNAL</Badge>
+      {/* Row 4: charts */}
+      <div className="grid grid-cols-12 gap-2.5 mb-3">
+        <Card className="col-span-12 lg:col-span-6 py-0">
+          <CardHeader className="px-3 pt-2.5 pb-1 flex-row items-center justify-between">
+            <CardTitle className="text-[13px]">Customer Price vs Internal Cost — by Category</CardTitle>
+            <Badge variant="outline" className="h-4 px-1.5 border-amber-400 text-amber-800 bg-amber-100/70 text-[9px]">INTERNAL</Badge>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={costByCategory} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+          <CardContent className="px-2 pb-2">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={costByCategory} margin={{ top: 5, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="name" fontSize={11} />
-                <YAxis fontSize={11} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <XAxis dataKey="name" fontSize={10} />
+                <YAxis fontSize={10} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
                 <Tooltip formatter={(v: number) => `$${v.toLocaleString()}`} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="customer" fill="var(--brand)" name="Customer Price" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="internal" fill="#10b981" name="Internal Cost" radius={[4, 4, 0, 0]} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="customer" fill="var(--brand)" name="Customer Price" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="internal" fill="#10b981" name="Internal Cost" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm">Risk Summary</CardTitle></CardHeader>
-          <CardContent className="space-y-2.5">
+        <Card className="col-span-12 md:col-span-6 lg:col-span-3 py-0">
+          <CardHeader className="px-3 pt-2.5 pb-1"><CardTitle className="text-[13px]">Risk Summary</CardTitle></CardHeader>
+          <CardContent className="px-3 pb-3 space-y-1.5">
             {riskSummary.map((r) => {
-              const total = riskSummary.reduce((a, b) => a + b.value, 0);
-              const pct = (r.value / total) * 100;
+              const pct = (r.value / riskTotal) * 100;
               return (
                 <div key={r.name}>
-                  <div className="flex items-center justify-between text-xs mb-1">
+                  <div className="flex items-center justify-between text-[11px] mb-0.5">
                     <span className="font-medium">{r.name}</span>
-                    <span className="tabular-nums text-muted-foreground">{r.value} parts</span>
+                    <span className="tabular-nums text-muted-foreground">{r.value}</span>
                   </div>
-                  <div className="h-2 rounded bg-muted overflow-hidden">
+                  <div className="h-1.5 rounded bg-muted overflow-hidden">
                     <div className="h-full rounded" style={{ width: `${pct}%`, background: r.color }} />
                   </div>
                 </div>
@@ -186,25 +186,22 @@ function ProjectOverview() {
             })}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Supplier strategy + BOM version */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="lg:col-span-2">
-          <CardHeader className="pb-2"><CardTitle className="text-sm">Supplier Strategy — Spend Distribution</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
+        <Card className="col-span-12 md:col-span-6 lg:col-span-3 py-0">
+          <CardHeader className="px-3 pt-2.5 pb-1"><CardTitle className="text-[13px]">Supplier Strategy</CardTitle></CardHeader>
+          <CardContent className="px-3 pb-3 space-y-1.5">
             {supplierStrategy.map((s) => {
               const pct = (s.value / supplierTotal) * 100;
               return (
                 <div key={s.name}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
+                  <div className="flex items-center justify-between text-[11px] mb-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-sm" style={{ background: s.color }} />
                       <span className="font-medium">{s.name}</span>
                     </div>
-                    <span className="tabular-nums text-muted-foreground">${s.value.toLocaleString()} · {pct.toFixed(1)}%</span>
+                    <span className="tabular-nums text-muted-foreground">{pct.toFixed(0)}%</span>
                   </div>
-                  <div className="h-2 rounded bg-muted overflow-hidden">
+                  <div className="h-1.5 rounded bg-muted overflow-hidden">
                     <div className="h-full rounded" style={{ width: `${pct}%`, background: s.color }} />
                   </div>
                 </div>
@@ -212,25 +209,26 @@ function ProjectOverview() {
             })}
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm">BOM Version / Pricing Snapshot</CardTitle></CardHeader>
-          <CardContent className="text-sm space-y-3">
-            <RowItem label="Active BOM Version" value={<span className="font-mono font-semibold">v4.2</span>} />
-            <RowItem label="Current Pricing Snapshot" value="With China Quote" />
-            <RowItem label="China Quote loaded" value={<span className="inline-flex items-center gap-1 text-risk-low font-medium"><CheckCircle2 className="h-3.5 w-3.5" /> Yes</span>} />
-            <RowItem label="Official Rep Quote loaded" value={<span className="inline-flex items-center gap-1 text-risk-low font-medium"><CheckCircle2 className="h-3.5 w-3.5" /> Yes</span>} />
-            <RowItem label="Last export" value={<span className="text-xs">Customer PDF · 14/06/2026</span>} />
-          </CardContent>
-        </Card>
       </div>
 
-      {/* Tables */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2 flex-row items-center justify-between">
-            <CardTitle className="text-sm flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-risk-low" /> Top Savings Opportunities</CardTitle>
-            <Badge variant="outline" className="border-amber-400 text-amber-800 bg-amber-100/70 text-[10px]">INTERNAL</Badge>
+      {/* BOM version snapshot */}
+      <Card className="mb-3 py-0">
+        <CardContent className="px-4 py-2 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">BOM Version / Pricing Snapshot</span>
+          <InfoInline label="Active BOM" value={<span className="font-mono font-semibold">v4.2</span>} />
+          <InfoInline label="Snapshot" value="With China Quote" />
+          <InfoInline label="China Quote" value={<span className="inline-flex items-center gap-1 text-risk-low font-medium"><CheckCircle2 className="h-3 w-3" /> Yes</span>} />
+          <InfoInline label="Official Rep" value={<span className="inline-flex items-center gap-1 text-risk-low font-medium"><CheckCircle2 className="h-3 w-3" /> Yes</span>} />
+          <InfoInline label="Last Export" value="Customer PDF · 14/06/2026" />
+        </CardContent>
+      </Card>
+
+      {/* Row 5: tables */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
+        <Card className="py-0">
+          <CardHeader className="px-3 pt-2.5 pb-1 flex-row items-center justify-between">
+            <CardTitle className="text-[13px] flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5 text-risk-low" /> Top Savings Opportunities</CardTitle>
+            <Badge variant="outline" className="h-4 px-1.5 border-amber-400 text-amber-800 bg-amber-100/70 text-[9px]">INTERNAL</Badge>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -238,10 +236,10 @@ function ProjectOverview() {
                 <TableRow>
                   <TableHead className="text-right">MPN</TableHead>
                   <TableHead className="text-right">Manufacturer</TableHead>
-                  <TableHead className="text-right tabular-nums">Cust. Unit</TableHead>
-                  <TableHead className="text-right tabular-nums">Int. Unit</TableHead>
+                  <TableHead className="text-right tabular-nums">Cust.</TableHead>
+                  <TableHead className="text-right tabular-nums">Int.</TableHead>
                   <TableHead className="text-right tabular-nums">Saving</TableHead>
-                  <TableHead className="text-right">Internal Source</TableHead>
+                  <TableHead className="text-right">Source</TableHead>
                   <TableHead className="text-right">Risk</TableHead>
                 </TableRow>
               </TableHeader>
@@ -251,14 +249,14 @@ function ProjectOverview() {
                   const pct = (save / r.cust) * 100;
                   return (
                     <TableRow key={r.mpn}>
-                      <TableCell className="font-mono text-xs">{r.mpn}</TableCell>
-                      <TableCell className="text-xs">{r.mfr}</TableCell>
+                      <TableCell className="font-mono text-[11px]">{r.mpn}</TableCell>
+                      <TableCell className="text-[11px]">{r.mfr}</TableCell>
                       <TableCell className="text-right tabular-nums">${r.cust.toFixed(2)}</TableCell>
                       <TableCell className="text-right tabular-nums">${r.intCost.toFixed(2)}</TableCell>
                       <TableCell className="text-right tabular-nums text-risk-low font-semibold">
-                        ${save.toFixed(2)} <span className="text-[10px] text-muted-foreground">({pct.toFixed(0)}%)</span>
+                        <bdi dir="ltr">${save.toFixed(2)} ({pct.toFixed(0)}%)</bdi>
                       </TableCell>
-                      <TableCell className="text-xs">{r.source}</TableCell>
+                      <TableCell className="text-[11px]">{r.source}</TableCell>
                       <TableCell><RiskBadge level={r.risk} /></TableCell>
                     </TableRow>
                   );
@@ -268,33 +266,33 @@ function ProjectOverview() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-risk-critical" /> Top Risk Items</CardTitle>
+        <Card className="py-0">
+          <CardHeader className="px-3 pt-2.5 pb-1">
+            <CardTitle className="text-[13px] flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-risk-critical" /> Top Risk Items</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-right">MPN</TableHead>
-                  <TableHead className="text-right">Manufacturer</TableHead>
-                  <TableHead className="text-right">Risk Level</TableHead>
-                  <TableHead className="text-right">Risk Reason</TableHead>
+                  <TableHead className="text-right">Mfr.</TableHead>
+                  <TableHead className="text-right">Risk</TableHead>
+                  <TableHead className="text-right">Reason</TableHead>
                   <TableHead className="text-right tabular-nums">Stock</TableHead>
-                  <TableHead className="text-right">Lead Time</TableHead>
-                  <TableHead className="text-right">Recommended Action</TableHead>
+                  <TableHead className="text-right">Lead</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {topRisks.map((r) => (
                   <TableRow key={r.mpn}>
-                    <TableCell className="font-mono text-xs">{r.mpn}</TableCell>
-                    <TableCell className="text-xs">{r.mfr}</TableCell>
+                    <TableCell className="font-mono text-[11px]">{r.mpn}</TableCell>
+                    <TableCell className="text-[11px]">{r.mfr}</TableCell>
                     <TableCell><RiskBadge level={r.risk} /></TableCell>
-                    <TableCell className="text-xs">{r.reason}</TableCell>
-                    <TableCell className="text-right tabular-nums text-xs">{r.stock.toLocaleString()}</TableCell>
-                    <TableCell className="text-right text-xs">{r.lead}</TableCell>
-                    <TableCell className="text-xs">{r.action}</TableCell>
+                    <TableCell className="text-[11px]">{r.reason}</TableCell>
+                    <TableCell className="text-right tabular-nums text-[11px]">{r.stock.toLocaleString()}</TableCell>
+                    <TableCell className="text-right text-[11px]">{r.lead}</TableCell>
+                    <TableCell className="text-[11px]">{r.action}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -306,20 +304,11 @@ function ProjectOverview() {
   );
 }
 
-function Info({ label, value }: { label: string; value: React.ReactNode }) {
+function InfoInline({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</div>
-      <div className="font-semibold mt-1 text-sm">{value}</div>
-    </div>
-  );
-}
-
-function RowItem({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between border-b border-border/50 pb-2 last:border-0 last:pb-0">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span>{value}</span>
-    </div>
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+      <span className="font-semibold text-[12px]">{value}</span>
+    </span>
   );
 }

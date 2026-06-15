@@ -7,7 +7,7 @@ export function Kpi({
   tone = "default",
 }: {
   label: string;
-  value: string | number;
+  value: React.ReactNode;
   hint?: string;
   tone?: "default" | "good" | "warn" | "bad";
 }) {
@@ -18,11 +18,11 @@ export function Kpi({
     bad: "text-risk-critical",
   }[tone];
   return (
-    <Card className="border-border/60">
-      <CardContent className="p-4">
-        <div className="text-xs text-muted-foreground mb-1">{label}</div>
-        <div className={`text-2xl font-semibold ${toneCls}`}>{value}</div>
-        {hint && <div className="text-[11px] text-muted-foreground mt-1">{hint}</div>}
+    <Card className="border-border/60 py-0">
+      <CardContent className="p-3">
+        <div className="text-[11px] text-muted-foreground mb-0.5 leading-tight">{label}</div>
+        <div className={`text-[22px] font-semibold leading-tight ${toneCls}`}>{value}</div>
+        {hint && <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{hint}</div>}
       </CardContent>
     </Card>
   );
@@ -38,13 +38,12 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
+    <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
-        {subtitle && <p className="text-sm text-muted-foreground mt-2">{subtitle}</p>}
+        <h1 className="text-2xl font-bold tracking-tight leading-tight">{title}</h1>
+        {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
       </div>
-      {actions && <div className="flex gap-2 flex-wrap">{actions}</div>}
+      {actions && <div className="flex gap-1.5 flex-wrap">{actions}</div>}
     </div>
   );
 }
-
