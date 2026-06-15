@@ -96,6 +96,23 @@ function Quality() {
       <PageHeader
         title="איכות BOM וזיהוי רכיבים"
         subtitle="המערכת מזהה רכיבים לפי MPN, משווה לתיאור המקורי, ומעדכנת תיאור תקני ממקורות כמו Digi-Key או Mouser."
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => alert("ייצוא דוח איכות BOM")}>
+              ייצוא דוח איכות BOM
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReviewFilter(reviewFilter === "yes" ? "all" : "yes")}
+            >
+              הצג רק Needs Review
+            </Button>
+            <Button size="sm" onClick={() => alert("כל התיאורים המעודכנים אושרו")}>
+              אשר תיאורים מעודכנים
+            </Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
@@ -206,65 +223,46 @@ function Quality() {
                 <SheetTitle className="font-mono">{selected.matchedMpn}</SheetTitle>
                 <SheetDescription>{selected.manufacturer} · שורה {selected.line}</SheetDescription>
               </SheetHeader>
-              <div className="space-y-5 mt-6">
+
+              <div className="space-y-6 mt-6">
                 <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">נתוני לקוח מקוריים</div>
-                  <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1">
-                    <div><span className="text-muted-foreground">MPN: </span><span className="font-mono">{selected.originalMpn}</span></div>
-                    <div><span className="text-muted-foreground">תיאור: </span>{selected.originalDesc}</div>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-3">נתוני לקוח מקוריים</div>
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-2">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Original MPN</span><span className="font-mono">{selected.originalMpn}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Manufacturer</span><span>{selected.manufacturer}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Original Description</span><span className="text-right max-w-[60%]">{selected.originalDesc}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Qty</span><span className="tabular-nums">{selected.qty}</span></div>
                   </div>
                 </div>
+
                 <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">נתוני ספק מנורמלים</div>
-                  <div className="rounded-md border bg-brand/5 p-3 text-sm space-y-1">
-                    <div><span className="text-muted-foreground">MPN: </span><span className="font-mono">{selected.matchedMpn}</span></div>
-                    <div><span className="text-muted-foreground">תיאור: </span>{selected.normalizedDesc}</div>
-                    <div><span className="text-muted-foreground">יצרן: </span>{selected.manufacturer}</div>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-3">נתוני ספק מנורמלים</div>
+                  <div className="rounded-md border bg-brand/5 p-3 text-sm space-y-2">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Matched MPN</span><span className="font-mono">{selected.matchedMpn}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Normalized Description</span><span className="text-right max-w-[60%]">{selected.normalizedDesc}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Description Source</span><span>{descSource(selected)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Lifecycle Status</span><span>{selected.lifecycle}</span></div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">Match Confidence</div>
-                    <div className="text-2xl font-bold tabular-nums">{selected.confidence}%</div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {selected.confidence >= 95 ? "התאמה מדויקת ב-MPN ויצרן" : selected.confidence >= 85 ? "התאמה חלקית - וריאנט אריזה" : "התאמה נמוכה - דרושה בדיקה"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">Status</div>
-                    <StatusBadge s={selStatus} />
+
+                <div>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-3">ניתוח התאמה</div>
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-2">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Match Confidence</span><span className="tabular-nums font-semibold">{selected.confidence}%</span></div>
+                    <div className="flex justify-between items-center"><span className="text-muted-foreground">Status</span><StatusBadge s={selStatus} /></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Review Reason</span><span className="text-right max-w-[60%]">{reviewReason(selected, selStatus)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Description Updated</span><span>{selected.descUpdated ? "כן" : "לא"}</span></div>
                   </div>
                 </div>
+
                 <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">מה השתנה</div>
-                  <ul className="text-sm space-y-1 list-disc pr-5">
-                    {selected.originalMpn !== selected.matchedMpn && <li>MPN: <span className="font-mono">{selected.originalMpn}</span> → <span className="font-mono">{selected.matchedMpn}</span></li>}
-                    {selected.descUpdated && <li>תיאור נורמל לפי מקור חיצוני</li>}
-                    {selected.originalMpn === selected.matchedMpn && !selected.descUpdated && <li>אין שינויים - נתונים זהים למקור</li>}
-                  </ul>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">מקור התיאור המנורמל</div>
-                  <div className="text-sm">{descSource(selected)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">סיבת בדיקה</div>
-                  <div className="text-sm">{reviewReason(selected, selStatus)}</div>
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">פעולה מומלצת</div>
-                  <div className="rounded-md border border-brand/30 bg-brand/5 p-3 text-sm">
-                    {selStatus === "Exact Match" && "אשר אוטומטית - אין צורך בפעולה"}
-                    {selStatus === "Description Updated" && "סקור את התיאור המעודכן ואשר"}
-                    {selStatus === "Partial MPN" && "אשר וריאנט אריזה מול הלקוח"}
-                    {selStatus === "Conflict" && "פנה ללקוח להבהרת התיאור"}
-                    {selStatus === "Unidentified" && "בקש מהלקוח MPN מלא או datasheet"}
-                    {selStatus === "Needs Review" && "בדוק ידנית ואשר התאמה"}
+                  <div className="text-xs font-semibold text-muted-foreground uppercase mb-3">פעולה מומלצת</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button size="sm" variant="outline">קבל תיאור מנורמל</Button>
+                    <Button size="sm" variant="outline">בקש הבהרה מהלקוח</Button>
+                    <Button size="sm" variant="outline">מצא חלופה</Button>
+                    <Button size="sm" variant="outline">סמן כנבדק</Button>
                   </div>
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <Button className="flex-1">אשר התאמה</Button>
-                  <Button variant="outline" className="flex-1">סמן לבדיקה</Button>
                 </div>
               </div>
             </>
