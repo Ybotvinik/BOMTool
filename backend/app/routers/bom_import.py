@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 from decimal import Decimal, InvalidOperation
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -14,13 +17,16 @@ from app.schemas.bom_import import (
     BomImportResult,
     BomPreview,
     CandidateHeaderRow,
+    ExtractedMetadata,
 )
 from app.services.activity import log_activity
 from app.services.bom_parser import (
     clean_display,
     detect_header_row,
+    extract_metadata,
     list_sheets_and_rows,
     suggest_mapping,
+    suggest_version_name,
 )
 from app.services.file_storage import get_file_storage
 
@@ -48,6 +54,8 @@ async def preview_bom(
     file_path: str | None = Form(default=None),
     sheet_name: str | None = Form(default=None),
     header_row_index: int | None = Form(default=None),
+    project_id: int | None = Form(default=None),
+    db: Session = Depends(get_db),
 ) -> BomPreview:
     """Parse an uploaded BOM and return a preview, candidate header rows, the
     metadata rows above the header, and a suggested column mapping.
@@ -111,6 +119,20 @@ async def preview_bom(
         preview_rows = [[clean_display(c) for c in r] for r in data_rows[:PREVIEW_ROWS]]
         suggested = suggest_mapping(columns)
 
+    # Detect revision / source metadata from the rows above the header.
+    metadata = extract_metadata(rows, used_index)
+    existing_names: list[str] = []
+    if project_id is not None:
+        for v in db.scalars(
+            select(BomVersion).where(BomVersion.project_id == project_id)
+        ):
+            existing_names.append(v.version_label)
+            if v.version_name:
+                existing_names.append(v.version_name)
+    suggested_version_name, suggested_revision_code = suggest_version_name(
+        metadata, existing_names
+    )
+
     return BomPreview(
         file_path=path,
         file_name=display_name,
@@ -124,6 +146,9 @@ async def preview_bom(
         metadata_rows=metadata_rows,
         candidate_header_rows=[CandidateHeaderRow(**c) for c in candidates],
         suggested_mapping=suggested,
+        extracted_metadata=ExtractedMetadata(**metadata),
+        suggested_version_name=suggested_version_name,
+        suggested_revision_code=suggested_revision_code,
         warning=warning,
     )
 
@@ -211,11 +236,46 @@ def commit_bom(
         len(data_rows),
     )
 
+    # Resolve metadata + the final (non-conflicting) version name.
+    md = payload.extracted_metadata or ExtractedMetadata(**extract_metadata(rows, header_index))
+    existing_names: set[str] = set()
+    for v in db.scalars(
+        select(BomVersion).where(BomVersion.project_id == payload.project_id)
+    ):
+        existing_names.add(v.version_label)
+        if v.version_name:
+            existing_names.add(v.version_name)
+
+    requested_name = (payload.version_name or payload.version_label or "").strip()
+    if not requested_name:
+        requested_name, _ = suggest_version_name(md.model_dump(), list(existing_names))
+
+    final_name = requested_name
+    conflict = False
+    if final_name in existing_names:
+        conflict = True
+        n = 2
+        while f"{requested_name}-{n}" in existing_names:
+            n += 1
+        final_name = f"{requested_name}-{n}"
+
+    revision_code = payload.revision_code or md.revision_code
+    now = datetime.now(timezone.utc)
+
     version = BomVersion(
         project_id=payload.project_id,
-        version_label=payload.version_label,
+        version_label=final_name,
+        version_name=final_name,
+        revision_code=revision_code,
         status=payload.status,
         source=payload.source,
+        source_file_name=payload.file_path.split("/")[-1],
+        source_doc_number=md.doc_number,
+        board_name=md.board_name,
+        revised_date=md.revised_date,
+        build_quantity=project.build_quantity,
+        imported_at=now,
+        imported_by_user_id=user_id,
         is_active=payload.set_active,
         created_by_id=user_id,
     )
@@ -284,17 +344,32 @@ def commit_bom(
         skipped,
         project.active_version_id,
     )
+    src_file = version.source_file_name or payload.file_path.split("/")[-1]
     log_activity(
         db,
         user_id=user_id,
-        action_type="bom.import",
+        action_type="bom_uploaded",
         project_id=payload.project_id,
         entity_type="bom_version",
-        entity_name=version.version_label,
+        entity_name=final_name,
         change_summary=(
-            f"Imported BOM '{version.version_label}' with {line_count} lines "
-            f"(header row {header_index + 1}, {skipped} rows skipped) "
-            f"from '{payload.file_path.split('/')[-1]}'"
+            f"Uploaded BOM file '{src_file}' "
+            f"(revision={revision_code or '—'}, doc={md.doc_number or '—'}, "
+            f"board={md.board_name or '—'}, rows={line_count})"
+        ),
+        commit=False,
+    )
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="bom_version_created",
+        project_id=payload.project_id,
+        entity_type="bom_version",
+        entity_name=final_name,
+        change_summary=(
+            f"Created BOM version '{final_name}' with {line_count} lines "
+            f"(header row {header_index + 1}, {skipped} rows skipped)"
+            + (f"; renamed due to conflict with '{requested_name}'" if conflict else "")
         ),
         commit=False,
     )
@@ -305,7 +380,9 @@ def commit_bom(
         success=True,
         project_id=payload.project_id,
         bom_version_id=version.id,
-        version_name=version.version_label,
+        version_name=final_name,
+        revision_code=revision_code,
+        conflict=conflict,
         rows_imported=line_count,
         skipped_rows=skipped,
         missing_mpn_count=missing_mpn,
@@ -313,5 +390,5 @@ def commit_bom(
         dnp_count=dnp_count,
         needs_review_count=needs_review,
         line_count=line_count,
-        version_label=version.version_label,
+        version_label=final_name,
     )

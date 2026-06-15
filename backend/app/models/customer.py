@@ -13,6 +13,7 @@ class Customer(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    code: Mapped[str | None] = mapped_column(String(40))
     contact_name: Mapped[str | None] = mapped_column(String(120))
     contact_email: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)

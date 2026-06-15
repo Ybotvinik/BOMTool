@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user_id
-from app.models import Project
+from app.models import Customer, Project
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
 from app.services.activity import log_activity
 
@@ -58,20 +59,91 @@ def update_project(
     user_id: int | None = Depends(get_current_user_id),
 ) -> Project:
     project = db.get(Project, project_id)
-    if project is None:
+    if project is None or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Project not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(project, field, value)
+
+    data = payload.model_dump(exclude_unset=True)
+    changes: list[str] = []
+
+    # --- Customer: existing selection or inline creation ---
+    if payload.new_customer is not None:
+        cname = (payload.new_customer.name or "").strip()
+        if not cname:
+            raise HTTPException(status_code=400, detail="שם לקוח חדש חסר")
+        customer = Customer(name=cname, code=(payload.new_customer.code or "").strip() or None)
+        db.add(customer)
+        db.flush()
+        old_customer = db.get(Customer, project.customer_id)
+        old_name = old_customer.name if old_customer else str(project.customer_id)
+        if customer.id != project.customer_id:
+            changes.append(f"customer changed from '{old_name}' to '{cname}'")
+        project.customer_id = customer.id
+    elif data.get("customer_id") is not None and data["customer_id"] != project.customer_id:
+        new_customer = db.get(Customer, data["customer_id"])
+        if new_customer is None:
+            raise HTTPException(status_code=400, detail="הלקוח שנבחר לא קיים")
+        old_customer = db.get(Customer, project.customer_id)
+        old_name = old_customer.name if old_customer else str(project.customer_id)
+        changes.append(f"customer changed from '{old_name}' to '{new_customer.name}'")
+        project.customer_id = new_customer.id
+
+    # --- Name ---
+    if "name" in data:
+        new_name = (data["name"] or "").strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="שם פרויקט נדרש")
+        if new_name != project.name:
+            changes.append("project name changed")
+        project.name = new_name
+
+    # --- Project code: required, normalized, unique ---
+    if "code" in data:
+        new_code = re.sub(r"\s+", " ", (data["code"] or "").strip())
+        if not new_code:
+            raise HTTPException(status_code=400, detail="קוד פרויקט נדרש")
+        if new_code != project.code:
+            dup = db.scalar(
+                select(Project).where(
+                    Project.code == new_code, Project.id != project.id
+                )
+            )
+            if dup is not None:
+                raise HTTPException(
+                    status_code=409, detail="קוד פרויקט כבר קיים במערכת"
+                )
+            changes.append("project code changed")
+        project.code = new_code
+
+    # --- Status ---
+    if "status" in data and data["status"] and data["status"] != project.status:
+        changes.append("status changed")
+        project.status = data["status"]
+
+    # --- Build quantity ---
+    if "build_quantity" in data and data["build_quantity"] is not None:
+        if data["build_quantity"] != project.build_quantity:
+            changes.append("build quantity changed")
+        project.build_quantity = data["build_quantity"]
+
+    # --- Description / notes ---
+    if "description" in data:
+        project.description = data["description"]
+
+    if "active_version_id" in data:
+        project.active_version_id = data["active_version_id"]
+
     db.commit()
     db.refresh(project)
     log_activity(
         db,
         user_id=user_id,
-        action_type="project.update",
+        action_type="project_updated",
         project_id=project.id,
         entity_type="project",
         entity_name=project.name,
-        change_summary=f"Updated project '{project.name}'",
+        change_summary=(
+            "; ".join(changes) if changes else f"Updated project '{project.name}'"
+        ),
     )
     return project
 

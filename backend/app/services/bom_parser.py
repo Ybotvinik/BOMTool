@@ -222,3 +222,143 @@ def suggest_mapping(columns: list[str]) -> dict[str, str | None]:
     if mapping.get("mpn") is None and mapping.get("supplier_part_number"):
         mapping["mpn"] = mapping["supplier_part_number"]
     return mapping
+
+
+# --- BOM revision / metadata detection ---------------------------------------
+
+# Field -> ordered label variants (most specific first). Order across fields
+# matters: "revised date" is matched before "revision"/"rev".
+_METADATA_LABELS: list[tuple[str, list[str]]] = [
+    ("board_name", ["board name", "board", "pcb name", "assembly name"]),
+    ("doc_number", ["document number", "doc. number", "doc number", "doc no", "document no"]),
+    ("bom_number", ["bom number", "bom no", "bom #"]),
+    ("revised_date", ["revised date", "release date", "rev date", "date"]),
+    ("revision", ["revision", "rev."]),
+    ("revision", ["rev"]),
+]
+
+_REVISION_RE = re.compile(r"(?i)(?:^|[-_\s:])R\s*-?\s*(\d+[a-z]?)\b")
+_DATE_FORMATS = [
+    "%d.%m.%Y",
+    "%d.%m.%y",
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y/%m/%d",
+    "%d-%m-%Y",
+]
+
+
+def extract_revision(text: str) -> str | None:
+    """Pull a revision token like ``R09`` out of a string (e.g. a doc number)."""
+    if not text:
+        return None
+    m = _REVISION_RE.search(text)
+    if m:
+        return f"R{m.group(1).upper()}"
+    return None
+
+
+def _normalize_date(text: str) -> str | None:
+    from datetime import datetime
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(raw, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def _match_label(cell_norm: str) -> str | None:
+    for field, labels in _METADATA_LABELS:
+        for lab in labels:
+            if cell_norm == lab or cell_norm.startswith(lab + " "):
+                return field
+    return None
+
+
+def extract_metadata(rows: list[list[str]], header_index: int | None) -> dict[str, str | None]:
+    """Extract board/doc/revision/date metadata from rows above the header.
+
+    Handles 'label: value' in one cell, and 'label' + adjacent-cell value.
+    """
+    out: dict[str, str | None] = {
+        "board_name": None,
+        "doc_number": None,
+        "revised_date": None,
+        "revision": None,
+        "bom_number": None,
+    }
+    upper = header_index if header_index is not None else min(len(rows), SCAN_ROWS)
+    for row in rows[:upper]:
+        for i, cell in enumerate(row):
+            text = clean_display(cell)
+            if not text:
+                continue
+            # Case A: "label: value" in a single cell.
+            if ":" in text:
+                label_part, _, value_part = text.partition(":")
+                field = _match_label(normalize_key(label_part))
+                if field and out.get(field) is None and value_part.strip():
+                    out[field] = value_part.strip()
+                    continue
+            # Case B: cell is a label; value is the next non-empty cell.
+            field = _match_label(normalize_key(text))
+            if field and out.get(field) is None:
+                for nxt in row[i + 1 :]:
+                    val = clean_display(nxt)
+                    if val:
+                        out[field] = val
+                        break
+
+    # Derive a clean revision code from revision text or the doc number.
+    rev_code: str | None = None
+    if out["revision"]:
+        rev_code = extract_revision(out["revision"]) or _format_rev(out["revision"])
+    if not rev_code and out["doc_number"]:
+        rev_code = extract_revision(out["doc_number"])
+    out["revision_code"] = rev_code
+    return out
+
+
+def _format_rev(raw: str) -> str | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        return f"R{raw.zfill(2)}"
+    return raw
+
+
+def suggest_version_name(
+    metadata: dict[str, str | None], existing_names: list[str]
+) -> tuple[str, str | None]:
+    """Return (suggested_version_name, revision_code) following the spec rules."""
+    existing = set(existing_names)
+    revision_code = metadata.get("revision_code")
+
+    base: str | None = revision_code
+    if not base:
+        date_iso = _normalize_date(metadata.get("revised_date") or "")
+        if date_iso:
+            base = f"v{date_iso}"
+    if not base:
+        # Next sequential vN based on existing v-numbers.
+        max_n = 0
+        for name in existing_names:
+            m = re.fullmatch(r"v(\d+)", name.strip())
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+        base = f"v{max_n + 1}"
+
+    name = base
+    if name in existing:
+        n = 2
+        while f"{base}-{n}" in existing:
+            n += 1
+        name = f"{base}-{n}"
+    return name, revision_code

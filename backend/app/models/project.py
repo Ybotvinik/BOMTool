@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -20,6 +20,7 @@ class Project(Base, TimestampMixin):
     code: Mapped[str] = mapped_column(String(60), unique=True, nullable=False)
     build_quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     status: Mapped[str] = mapped_column(String(40), default="Active", nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     # Logical pointer to the active BomVersion. Kept as a plain integer to avoid a
     # circular FK with bom_versions; resolved in application code.
     active_version_id: Mapped[int | None] = mapped_column(Integer)

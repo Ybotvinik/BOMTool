@@ -27,6 +27,15 @@ type CandidateRow = {
   keyword_hits: number;
 };
 
+type ExtractedMetadata = {
+  board_name: string | null;
+  doc_number: string | null;
+  revised_date: string | null;
+  revision: string | null;
+  bom_number: string | null;
+  revision_code: string | null;
+};
+
 type Preview = {
   file_path: string;
   file_name: string;
@@ -40,6 +49,9 @@ type Preview = {
   metadata_rows: string[][];
   candidate_header_rows: CandidateRow[];
   suggested_mapping: Record<string, string | null>;
+  extracted_metadata: ExtractedMetadata;
+  suggested_version_name: string;
+  suggested_revision_code: string | null;
   warning: string | null;
 };
 
@@ -105,6 +117,8 @@ export default function UploadBomPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [showMeta, setShowMeta] = useState(false);
+  // Track manual edits so re-previews don't clobber a user-entered version name.
+  const [versionEdited, setVersionEdited] = useState(false);
 
   useEffect(() => {
     apiGet<ApiProject[]>("/api/projects")
@@ -118,6 +132,10 @@ export default function UploadBomPage() {
   function applyPreview(pv: Preview) {
     setPreview(pv);
     setMapping(pv.suggested_mapping);
+    // Auto-fill the version name from the file unless the user edited it.
+    if (!versionEdited && pv.suggested_version_name) {
+      setVersionLabel(pv.suggested_version_name);
+    }
   }
 
   async function onFile(file: File | undefined) {
@@ -125,10 +143,14 @@ export default function UploadBomPage() {
     setError(null);
     setResult(null);
     setBusy(true);
+    setVersionEdited(false);
     try {
-      const pv = await apiBomPreview<Preview>({ file, userId: user.id });
+      const pv = await apiBomPreview<Preview>({
+        file,
+        projectId: projectId ?? undefined,
+        userId: user.id,
+      });
       applyPreview(pv);
-      if (!versionLabel) setVersionLabel(`v${new Date().toISOString().slice(0, 10)}`);
     } catch (e) {
       setError(String(e));
       setPreview(null);
@@ -147,6 +169,7 @@ export default function UploadBomPage() {
         filePath: preview.file_path,
         headerRowIndex: opts.headerRowIndex,
         sheetName: opts.sheetName ?? preview.sheet_name,
+        projectId: projectId ?? undefined,
         userId: user.id,
       });
       applyPreview(pv);
@@ -170,7 +193,9 @@ export default function UploadBomPage() {
         "/api/bom-import/commit",
         {
           project_id: projectId,
-          version_label: versionLabel || "v-import",
+          version_name: versionLabel || preview.suggested_version_name,
+          revision_code: preview.suggested_revision_code,
+          extracted_metadata: preview.extracted_metadata,
           status: "In Review",
           source: "excel-import",
           file_path: preview.file_path,
@@ -297,13 +322,21 @@ export default function UploadBomPage() {
               </select>
             </div>
             <div>
-              <label className="block text-[12px] text-slate-600 mb-1">תווית גרסה</label>
+              <label className="block text-[12px] text-slate-600 mb-1">שם גרסת BOM</label>
               <input
                 value={versionLabel}
-                onChange={(e) => setVersionLabel(e.target.value)}
-                placeholder="v3.1"
+                onChange={(e) => {
+                  setVersionLabel(e.target.value);
+                  setVersionEdited(true);
+                }}
+                placeholder="R09 / v1"
                 className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
               />
+              {preview && (
+                <p className="mt-1 text-[10.5px] text-slate-400 leading-snug">
+                  המערכת זיהתה גרסה מתוך הקובץ. ניתן לעדכן ידנית לפני הייבוא.
+                </p>
+              )}
             </div>
             <label className="flex items-center gap-2 text-[12.5px] text-slate-700">
               <input type="checkbox" checked={setActive} onChange={(e) => setSetActive(e.target.checked)} />
@@ -435,6 +468,39 @@ export default function UploadBomPage() {
                     <span>{preview.warning}</span>
                   </div>
                 )}
+
+                {/* Detected file metadata */}
+                <div className="mb-4 rounded-md border border-brand/20 bg-brand-soft/40 p-3">
+                  <div className="text-[12.5px] font-semibold text-navy mb-2">
+                    נתונים שזוהו מהקובץ
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-[11.5px]">
+                    <div>
+                      <span className="text-slate-500">Board Name: </span>
+                      <span className="font-medium">{preview.extracted_metadata.board_name || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Doc Number: </span>
+                      <span className="font-medium">{preview.extracted_metadata.doc_number || "—"}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Revision: </span>
+                      <span className="font-medium">
+                        {preview.extracted_metadata.revision_code ||
+                          preview.extracted_metadata.revision ||
+                          "—"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Revised Date: </span>
+                      <span className="font-medium">{preview.extracted_metadata.revised_date || "—"}</span>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <span className="text-slate-500">Suggested BOM Version: </span>
+                      <span className="font-semibold text-brand">{preview.suggested_version_name}</span>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="flex items-center gap-2 mb-2">
                   <Table2 className="h-4 w-4 text-brand" />

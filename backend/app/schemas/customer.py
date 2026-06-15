@@ -7,6 +7,7 @@ from app.schemas.common import ORMModel
 
 class CustomerBase(BaseModel):
     name: str
+    code: str | None = None
     contact_name: str | None = None
     contact_email: str | None = None
     notes: str | None = None
@@ -18,6 +19,7 @@ class CustomerCreate(CustomerBase):
 
 class CustomerUpdate(BaseModel):
     name: str | None = None
+    code: str | None = None
     contact_name: str | None = None
     contact_email: str | None = None
     notes: str | None = None

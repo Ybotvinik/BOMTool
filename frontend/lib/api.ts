@@ -85,6 +85,7 @@ export async function apiBomPreview<T>(opts: {
   filePath?: string;
   headerRowIndex?: number;
   sheetName?: string;
+  projectId?: number;
   userId?: number;
 }): Promise<T> {
   const path = "/api/bom-import/preview";
@@ -94,6 +95,7 @@ export async function apiBomPreview<T>(opts: {
   if (opts.headerRowIndex != null)
     form.append("header_row_index", String(opts.headerRowIndex));
   if (opts.sheetName) form.append("sheet_name", opts.sheetName);
+  if (opts.projectId != null) form.append("project_id", String(opts.projectId));
   const headers: Record<string, string> = {};
   if (opts.userId != null) headers["X-User-Id"] = String(opts.userId);
   const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form });

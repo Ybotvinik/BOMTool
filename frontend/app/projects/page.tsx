@@ -3,59 +3,62 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Upload, FolderOpen, RefreshCw, Pencil, Trash2 } from "lucide-react";
-import { Card, PageHeader, Kpi, StatusBadge, Badge } from "@/components/ui";
+import { Card, PageHeader, Kpi, StatusBadge } from "@/components/ui";
 import { projects as mockProjects, type Project } from "@/lib/mock-data";
 import { API_URL, apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
 
 const STATUS_OPTIONS = ["Active", "In Review", "Quoting", "Archived"];
+const NEW_CUSTOMER = "new";
 
 type ApiProject = {
   id: number;
+  customer_id: number;
   name: string;
   code: string;
   status: string;
   build_quantity: number;
-  customer_id: number;
+  description: string | null;
+  active_version_id: number | null;
+  updated_at: string;
 };
 
-const fmt = (n: number) => `$${n.toLocaleString()}`;
+type ApiCustomer = { id: number; name: string; code: string | null };
+type ApiVersion = { id: number; version_label: string; version_name: string | null };
 
 export default function ProjectsPage() {
   const { user } = useCurrentUser();
-  const [rows, setRows] = useState<Project[]>(mockProjects);
+  const [apiRows, setApiRows] = useState<ApiProject[]>([]);
+  const [customers, setCustomers] = useState<ApiCustomer[]>([]);
+  const [versions, setVersions] = useState<ApiVersion[]>([]);
   const [live, setLive] = useState(false);
   const [creating, setCreating] = useState(false);
 
   // Edit / delete state.
-  const [editRow, setEditRow] = useState<Project | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editStatus, setEditStatus] = useState("Active");
-  const [deleteRow, setDeleteRow] = useState<Project | null>(null);
+  const [editRow, setEditRow] = useState<ApiProject | null>(null);
+  const [fCustomer, setFCustomer] = useState<string>("");
+  const [fNewName, setFNewName] = useState("");
+  const [fNewCode, setFNewCode] = useState("");
+  const [fName, setFName] = useState("");
+  const [fCode, setFCode] = useState("");
+  const [fStatus, setFStatus] = useState("Active");
+  const [fQty, setFQty] = useState<number>(1);
+  const [fDesc, setFDesc] = useState("");
+  const [deleteRow, setDeleteRow] = useState<ApiProject | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function load() {
     try {
-      const data = await apiGet<ApiProject[]>("/api/projects");
-      if (Array.isArray(data) && data.length > 0) {
-        setRows(
-          data.map((p) => ({
-            id: p.id,
-            customer: `Customer #${p.customer_id}`,
-            name: p.name,
-            code: p.code,
-            activeVersion: "—",
-            status: (p.status as Project["status"]) ?? "Active",
-            customerValue: 0,
-            internalCost: 0,
-            critical: 0,
-            needsReview: 0,
-            lastUpdated: new Date().toISOString().slice(0, 10),
-          })),
-        );
-        setLive(true);
-      }
+      const [ps, cs, vs] = await Promise.all([
+        apiGet<ApiProject[]>("/api/projects"),
+        apiGet<ApiCustomer[]>("/api/customers"),
+        apiGet<ApiVersion[]>("/api/bom-versions"),
+      ]);
+      setApiRows(ps);
+      setCustomers(cs);
+      setVersions(vs);
+      setLive(true);
     } catch {
       setLive(false);
     }
@@ -65,14 +68,23 @@ export default function ProjectsPage() {
     load();
   }, []);
 
+  const customerName = (id: number) =>
+    customers.find((c) => c.id === id)?.name ?? `Customer #${id}`;
+  const versionName = (id: number | null) => {
+    if (id == null) return "—";
+    const v = versions.find((x) => x.id === id);
+    return v ? v.version_name ?? v.version_label : "—";
+  };
+
   async function createProject() {
     setCreating(true);
     try {
       const stamp = Date.now().toString().slice(-5);
+      const customerId = customers[0]?.id ?? 1;
       await apiPost(
         "/api/projects",
         {
-          customer_id: 1,
+          customer_id: customerId,
           name: `פרויקט חדש ${stamp}`,
           code: `NEW-${stamp}`,
           build_quantity: 100,
@@ -88,27 +100,47 @@ export default function ProjectsPage() {
     }
   }
 
-  function openEdit(p: Project) {
+  function openEdit(p: ApiProject) {
     setActionError(null);
     setEditRow(p);
-    setEditName(p.name);
-    setEditStatus(p.status);
+    setFCustomer(String(p.customer_id));
+    setFNewName("");
+    setFNewCode("");
+    setFName(p.name);
+    setFCode(p.code);
+    setFStatus(p.status);
+    setFQty(p.build_quantity);
+    setFDesc(p.description ?? "");
   }
 
   async function saveEdit() {
     if (!editRow) return;
+    if (!fName.trim()) return setActionError("שם פרויקט נדרש");
+    if (!fCode.trim()) return setActionError("קוד פרויקט נדרש");
+    if (fCustomer === NEW_CUSTOMER && !fNewName.trim())
+      return setActionError("שם לקוח חדש נדרש");
+
     setActionBusy(true);
     setActionError(null);
     try {
-      await apiPatch(
-        `/api/projects/${editRow.id}`,
-        { name: editName, status: editStatus },
-        user.id,
-      );
+      const body: Record<string, unknown> = {
+        name: fName,
+        code: fCode,
+        status: fStatus,
+        build_quantity: fQty,
+        description: fDesc || null,
+      };
+      if (fCustomer === NEW_CUSTOMER) {
+        body.new_customer = { name: fNewName, code: fNewCode || null };
+      } else {
+        body.customer_id = Number(fCustomer);
+      }
+      await apiPatch(`/api/projects/${editRow.id}`, body, user.id);
       setEditRow(null);
       await load();
     } catch (e) {
-      setActionError(String(e));
+      // Surface backend validation message (e.g. duplicate project code).
+      setActionError(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setActionBusy(false);
     }
@@ -129,12 +161,15 @@ export default function ProjectsPage() {
     }
   }
 
-  const total = rows.length;
-  const active = rows.filter(
-    (p) => p.status === "Active" || p.status === "Quoting",
-  ).length;
-  const inReview = rows.filter((p) => p.status === "In Review").length;
-  const criticalTotal = rows.reduce((s, p) => s + p.critical, 0);
+  // Fall back to mock data only when the API is unreachable.
+  const mockRows: Project[] = mockProjects;
+  const total = live ? apiRows.length : mockRows.length;
+  const active = live
+    ? apiRows.filter((p) => p.status === "Active" || p.status === "Quoting").length
+    : mockRows.filter((p) => p.status === "Active" || p.status === "Quoting").length;
+  const inReview = live
+    ? apiRows.filter((p) => p.status === "In Review").length
+    : mockRows.filter((p) => p.status === "In Review").length;
 
   return (
     <>
@@ -180,11 +215,10 @@ export default function ProjectsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
         <Kpi label="סה״כ פרויקטים" value={total} />
         <Kpi label="פרויקטים פעילים" value={active} tone="good" />
         <Kpi label="BOMs בבדיקה" value={inReview} tone="warn" />
-        <Kpi label="רכיבים קריטיים" value={criticalTotal} tone="bad" />
         <Kpi label="דוחות שהופקו החודש" value={18} hint="יוני 2026" />
       </div>
 
@@ -195,74 +229,68 @@ export default function ProjectsPage() {
               <th className="px-3 py-2 font-medium">לקוח</th>
               <th className="px-3 py-2 font-medium">שם פרויקט</th>
               <th className="px-3 py-2 font-medium">קוד פרויקט</th>
-              <th className="px-3 py-2 font-medium">גרסת BOM פעילה</th>
+              <th className="px-3 py-2 font-medium">Active BOM Version</th>
               <th className="px-3 py-2 font-medium">סטטוס</th>
-              <th className="px-3 py-2 font-medium">Customer BOM Value</th>
-              <th className="px-3 py-2 font-medium">Internal Cost</th>
-              <th className="px-3 py-2 font-medium text-center">Critical Parts</th>
+              <th className="px-3 py-2 font-medium">Build Qty</th>
               <th className="px-3 py-2 font-medium">עודכן לאחרונה</th>
               {live && <th className="px-3 py-2 font-medium text-center">פעולות</th>}
             </tr>
           </thead>
           <tbody>
-            {rows.map((p) => (
-              <tr
-                key={p.id}
-                className="border-t border-slate-100 hover:bg-slate-50/60"
-              >
-                <td className="px-3 py-2 font-medium">{p.customer}</td>
-                <td className="px-3 py-2">
-                  <Link
-                    href="/project"
-                    className="text-brand hover:underline font-medium"
-                  >
-                    {p.name}
-                  </Link>
-                </td>
-                <td className="px-3 py-2 text-slate-500 tabular-nums">{p.code}</td>
-                <td className="px-3 py-2 tabular-nums">{p.activeVersion}</td>
-                <td className="px-3 py-2">
-                  <StatusBadge status={p.status} />
-                </td>
-                <td className="px-3 py-2 tabular-nums">{fmt(p.customerValue)}</td>
-                <td className="px-3 py-2 tabular-nums">{fmt(p.internalCost)}</td>
-                <td className="px-3 py-2 text-center">
-                  {p.critical > 0 ? (
-                    <Badge className="bg-red-50 text-risk-critical border-red-200">
-                      {p.critical}
-                    </Badge>
-                  ) : (
-                    <span className="text-slate-400">—</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 text-slate-500 tabular-nums">
-                  {p.lastUpdated}
-                </td>
-                {live && (
-                  <td className="px-3 py-2">
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        onClick={() => openEdit(p)}
-                        title="עריכה"
-                        className="h-7 w-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-brand"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionError(null);
-                          setDeleteRow(p);
-                        }}
-                        title="מחיקה"
-                        className="h-7 w-7 rounded-md hover:bg-red-50 flex items-center justify-center text-slate-500 hover:text-risk-critical"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                )}
-              </tr>
-            ))}
+            {live
+              ? apiRows.map((p) => (
+                  <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-3 py-2 font-medium">{customerName(p.customer_id)}</td>
+                    <td className="px-3 py-2">
+                      <Link href="/project" className="text-brand hover:underline font-medium">
+                        {p.name}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2 text-slate-500 tabular-nums">{p.code}</td>
+                    <td className="px-3 py-2 tabular-nums">{versionName(p.active_version_id)}</td>
+                    <td className="px-3 py-2">
+                      <StatusBadge status={p.status} />
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{p.build_quantity}</td>
+                    <td className="px-3 py-2 text-slate-500 tabular-nums">
+                      {p.updated_at?.slice(0, 10)}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => openEdit(p)}
+                          title="עריכה"
+                          className="h-7 w-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-brand"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setActionError(null);
+                            setDeleteRow(p);
+                          }}
+                          title="מחיקה"
+                          className="h-7 w-7 rounded-md hover:bg-red-50 flex items-center justify-center text-slate-500 hover:text-risk-critical"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              : mockRows.map((p) => (
+                  <tr key={p.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-medium">{p.customer}</td>
+                    <td className="px-3 py-2 text-brand font-medium">{p.name}</td>
+                    <td className="px-3 py-2 text-slate-500 tabular-nums">{p.code}</td>
+                    <td className="px-3 py-2 tabular-nums">{p.activeVersion}</td>
+                    <td className="px-3 py-2">
+                      <StatusBadge status={p.status} />
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">—</td>
+                    <td className="px-3 py-2 text-slate-500 tabular-nums">{p.lastUpdated}</td>
+                  </tr>
+                ))}
           </tbody>
         </table>
       </Card>
@@ -270,43 +298,108 @@ export default function ProjectsPage() {
       {/* Edit modal */}
       {editRow && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
-          <div dir="rtl" className="w-full max-w-md rounded-lg bg-white shadow-xl border border-slate-200">
+          <div dir="rtl" className="w-full max-w-lg rounded-lg bg-white shadow-xl border border-slate-200">
             <div className="px-4 py-3 border-b border-slate-200 text-[14px] font-semibold text-navy">
               עריכת פרויקט
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 max-h-[70vh] overflow-auto">
               {actionError && (
                 <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-[12px] px-3 py-2">
                   {actionError}
                 </div>
               )}
               <div>
-                <label className="block text-[12px] text-slate-600 mb-1">שם פרויקט</label>
+                <label className="block text-[12px] text-slate-600 mb-1">לקוח</label>
+                <select
+                  value={fCustomer}
+                  onChange={(e) => setFCustomer(e.target.value)}
+                  className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
+                >
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.code ? ` (${c.code})` : ""}
+                    </option>
+                  ))}
+                  <option value={NEW_CUSTOMER}>+ לקוח חדש</option>
+                </select>
+              </div>
+              {fCustomer === NEW_CUSTOMER && (
+                <div className="grid grid-cols-2 gap-2 rounded-md border border-dashed border-brand/30 bg-brand-soft/30 p-2.5">
+                  <div>
+                    <label className="block text-[11px] text-slate-600 mb-1">שם לקוח חדש *</label>
+                    <input
+                      value={fNewName}
+                      onChange={(e) => setFNewName(e.target.value)}
+                      className="w-full h-8 rounded-md border border-slate-200 px-2 text-[12px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-600 mb-1">קוד לקוח (אופציונלי)</label>
+                    <input
+                      value={fNewCode}
+                      onChange={(e) => setFNewCode(e.target.value)}
+                      className="w-full h-8 rounded-md border border-slate-200 px-2 text-[12px]"
+                    />
+                  </div>
+                </div>
+              )}
+              <div>
+                <label className="block text-[12px] text-slate-600 mb-1">שם פרויקט *</label>
                 <input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
+                  value={fName}
+                  onChange={(e) => setFName(e.target.value)}
                   className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[12px] text-slate-600 mb-1">קוד פרויקט *</label>
+                  <input
+                    value={fCode}
+                    onChange={(e) => setFCode(e.target.value)}
+                    className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] text-slate-600 mb-1">Build Quantity</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={fQty}
+                    onChange={(e) => setFQty(Number(e.target.value))}
+                    className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-[12px] text-slate-600 mb-1">סטטוס</label>
                 <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value)}
+                  value={fStatus}
+                  onChange={(e) => setFStatus(e.target.value)}
                   className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
                 >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
+                  {STATUS_OPTIONS.map((sv) => (
+                    <option key={sv} value={sv}>
+                      {sv}
                     </option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-[12px] text-slate-600 mb-1">תיאור / הערות</label>
+                <textarea
+                  value={fDesc}
+                  onChange={(e) => setFDesc(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-[12.5px]"
+                />
               </div>
             </div>
             <div className="px-4 py-3 border-t border-slate-200 flex justify-start gap-2">
               <button
                 onClick={saveEdit}
-                disabled={actionBusy || !editName.trim()}
+                disabled={actionBusy}
                 className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
               >
                 {actionBusy ? "שומר..." : "שמירה"}
