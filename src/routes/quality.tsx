@@ -96,6 +96,23 @@ function Quality() {
       <PageHeader
         title="איכות BOM וזיהוי רכיבים"
         subtitle="המערכת מזהה רכיבים לפי MPN, משווה לתיאור המקורי, ומעדכנת תיאור תקני ממקורות כמו Digi-Key או Mouser."
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => alert("ייצוא דוח איכות BOM")}>
+              ייצוא דוח איכות BOM
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReviewFilter(reviewFilter === "yes" ? "all" : "yes")}
+            >
+              הצג רק Needs Review
+            </Button>
+            <Button size="sm" onClick={() => alert("כל התיאורים המעודכנים אושרו")}>
+              אשר תיאורים מעודכנים
+            </Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3 mb-6">
