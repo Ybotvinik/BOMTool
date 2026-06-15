@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -172,7 +173,7 @@ def commit_bom(
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Uploaded file not found; re-upload")
 
-    _, _, rows = list_sheets_and_rows(content, payload.file_path, payload.sheet_name)
+    _, selected_sheet, rows = list_sheets_and_rows(content, payload.file_path, payload.sheet_name)
 
     header_index = payload.header_row_index
     if header_index is None:
@@ -183,7 +184,6 @@ def commit_bom(
     header = [clean_display(c) for c in rows[header_index]]
     col_index = {h: i for i, h in enumerate(header) if h}
     mapping = payload.mapping
-    mapped_fields = [f for f, col in mapping.items() if col and col in col_index]
 
     def cell(row: list[str], field: str) -> str:
         column = mapping.get(field)
@@ -191,6 +191,25 @@ def commit_bom(
             return ""
         idx = col_index[column]
         return clean_display(row[idx]) if idx < len(row) else ""
+
+    # A row is a valid BOM line if it has at least one of these (when mapped).
+    # We do NOT skip a row just because one optional mapped field is empty.
+    validity_fields = [
+        f
+        for f in ("mpn", "description", "reference_designators", "quantity", "value", "footprint")
+        if mapping.get(f) and mapping[f] in col_index
+    ]
+    data_rows = rows[header_index + 1 :]
+    log = logging.getLogger("bom.import")
+    log.info(
+        "BOM import: project_id=%s file_id=%s sheet=%s header_row_index=%s mapping=%s data_rows_parsed=%s",
+        payload.project_id,
+        payload.file_path,
+        selected_sheet,
+        header_index,
+        mapping,
+        len(data_rows),
+    )
 
     version = BomVersion(
         project_id=payload.project_id,
@@ -205,39 +224,66 @@ def commit_bom(
 
     line_count = 0
     skipped = 0
-    line_no = 0
-    for row in rows[header_index + 1 :]:
+    missing_mpn = 0
+    missing_qty = 0
+    dnp_count = 0
+    needs_review = 0
+    for row in data_rows:
         if not any(c.strip() for c in row):
             continue  # fully empty row
-        if not any(cell(row, f).strip() for f in mapped_fields):
+        check = validity_fields or [f for f in mapping if mapping.get(f) and mapping[f] in col_index]
+        if not any(cell(row, f).strip() for f in check):
             skipped += 1
-            continue  # no mapped values -> not a real BOM line
-        line_no += 1
-        qty = _to_decimal(cell(row, "quantity"))
-        line = BomLine(
-            bom_version_id=version.id,
-            line_no=line_no,
-            mpn=cell(row, "mpn") or None,
-            manufacturer=cell(row, "manufacturer") or None,
-            description=cell(row, "description") or None,
-            quantity=qty if qty is not None else Decimal(0),
-            reference_designators=cell(row, "reference_designators") or None,
-            footprint=cell(row, "footprint") or None,
-            value=cell(row, "value") or None,
-            supplier_part_number=cell(row, "supplier_part_number") or None,
-            unit=cell(row, "unit") or None,
-            customer_price=_to_decimal(cell(row, "customer_price")),
-            internal_cost=_to_decimal(cell(row, "internal_cost")),
-            is_critical=_to_bool(cell(row, "is_critical")),
-            dnp=_to_bool(cell(row, "dnp")),
-        )
-        db.add(line)
+            continue  # no meaningful values -> metadata / junk row
         line_count += 1
+        mpn = cell(row, "mpn") or None
+        qty = _to_decimal(cell(row, "quantity"))
+        is_dnp = _to_bool(cell(row, "dnp"))
+        has_qty = qty is not None and qty > 0
+        if not mpn:
+            missing_mpn += 1
+        if not has_qty:
+            missing_qty += 1
+        if is_dnp:
+            dnp_count += 1
+        if not mpn or not has_qty:
+            needs_review += 1
+        db.add(
+            BomLine(
+                bom_version_id=version.id,
+                line_no=line_count,
+                mpn=mpn,
+                manufacturer=cell(row, "manufacturer") or None,
+                description=cell(row, "description") or None,
+                quantity=qty if qty is not None else Decimal(0),
+                reference_designators=cell(row, "reference_designators") or None,
+                footprint=cell(row, "footprint") or None,
+                value=cell(row, "value") or None,
+                supplier_part_number=cell(row, "supplier_part_number") or None,
+                unit=cell(row, "unit") or None,
+                customer_price=_to_decimal(cell(row, "customer_price")),
+                internal_cost=_to_decimal(cell(row, "internal_cost")),
+                is_critical=_to_bool(cell(row, "is_critical")),
+                dnp=is_dnp,
+            )
+        )
 
     if payload.set_active:
+        # Ensure exactly one active version for this project.
+        db.query(BomVersion).filter(
+            BomVersion.project_id == payload.project_id,
+            BomVersion.id != version.id,
+        ).update({BomVersion.is_active: False})
         project.active_version_id = version.id
 
     db.flush()
+    log.info(
+        "BOM import done: bom_version_id=%s rows_inserted=%s skipped=%s active_version_id=%s",
+        version.id,
+        line_count,
+        skipped,
+        project.active_version_id,
+    )
     log_activity(
         db,
         user_id=user_id,
@@ -256,9 +302,16 @@ def commit_bom(
     db.refresh(version)
 
     return BomImportResult(
-        bom_version_id=version.id,
-        line_count=line_count,
-        skipped_rows=skipped,
+        success=True,
         project_id=payload.project_id,
+        bom_version_id=version.id,
+        version_name=version.version_label,
+        rows_imported=line_count,
+        skipped_rows=skipped,
+        missing_mpn_count=missing_mpn,
+        missing_qty_count=missing_qty,
+        dnp_count=dnp_count,
+        needs_review_count=needs_review,
+        line_count=line_count,
         version_label=version.version_label,
     )

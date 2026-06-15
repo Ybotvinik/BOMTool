@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user_id
-from app.models import BomVersion
+from app.models import BomLine, BomVersion
+from app.schemas.bom_line import BomLineRead
 from app.schemas.bom_version import (
     BomVersionCreate,
     BomVersionRead,
@@ -22,6 +23,19 @@ def list_bom_versions(
     stmt = select(BomVersion).order_by(BomVersion.id)
     if project_id is not None:
         stmt = stmt.where(BomVersion.project_id == project_id)
+    return list(db.scalars(stmt))
+
+
+@router.get("/{version_id}/lines", response_model=list[BomLineRead])
+def list_version_lines(version_id: int, db: Session = Depends(get_db)) -> list[BomLine]:
+    """Return all BOM lines for a given version (used by the BOM table page)."""
+    if db.get(BomVersion, version_id) is None:
+        raise HTTPException(status_code=404, detail="BOM version not found")
+    stmt = (
+        select(BomLine)
+        .where(BomLine.bom_version_id == version_id)
+        .order_by(BomLine.line_no, BomLine.id)
+    )
     return list(db.scalars(stmt))
 
 

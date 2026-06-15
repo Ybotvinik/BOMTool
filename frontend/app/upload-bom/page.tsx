@@ -44,11 +44,16 @@ type Preview = {
 };
 
 type ImportResult = {
+  success: boolean;
   bom_version_id: number;
-  line_count: number;
+  version_name: string;
+  rows_imported: number;
   skipped_rows: number;
+  missing_mpn_count: number;
+  missing_qty_count: number;
+  dnp_count: number;
+  needs_review_count: number;
   project_id: number;
-  version_label: string;
 };
 
 const FIELDS: { key: string; label: string; required?: boolean }[] = [
@@ -221,8 +226,8 @@ export default function UploadBomPage() {
             <div>
               <div className="text-[15px] font-semibold text-slate-800">הייבוא הושלם בהצלחה</div>
               <div className="text-[12.5px] text-slate-500">
-                נוצרה גרסת BOM ‏«{result.version_label}» עם{" "}
-                <span className="font-semibold">{result.line_count}</span> שורות
+                נוצרה גרסת BOM ‏«{result.version_name}» (#{result.bom_version_id}) עם{" "}
+                <span className="font-semibold">{result.rows_imported}</span> שורות
                 {result.skipped_rows > 0 && (
                   <> · ‏{result.skipped_rows} שורות לא תקינות דולגו</>
                 )}
@@ -230,9 +235,29 @@ export default function UploadBomPage() {
               </div>
             </div>
           </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            <div className="rounded-md border border-slate-200 p-2.5">
+              <div className="text-[10.5px] text-slate-500">Rows Imported</div>
+              <div className="text-[18px] font-bold tabular-nums">{result.rows_imported}</div>
+            </div>
+            <div className="rounded-md border border-slate-200 p-2.5">
+              <div className="text-[10.5px] text-slate-500">Needs Review</div>
+              <div className="text-[18px] font-bold tabular-nums text-amber-700">
+                {result.needs_review_count}
+              </div>
+            </div>
+            <div className="rounded-md border border-slate-200 p-2.5">
+              <div className="text-[10.5px] text-slate-500">Missing MPN</div>
+              <div className="text-[18px] font-bold tabular-nums">{result.missing_mpn_count}</div>
+            </div>
+            <div className="rounded-md border border-slate-200 p-2.5">
+              <div className="text-[10.5px] text-slate-500">DNP</div>
+              <div className="text-[18px] font-bold tabular-nums">{result.dnp_count}</div>
+            </div>
+          </div>
           <div className="flex gap-2">
             <Link
-              href="/bom"
+              href={`/bom?version_id=${result.bom_version_id}`}
               className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90"
             >
               <Table2 className="h-4 w-4" /> פתח טבלת BOM

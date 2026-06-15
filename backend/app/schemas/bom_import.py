@@ -41,8 +41,16 @@ class BomImportCommit(BaseModel):
 
 
 class BomImportResult(BaseModel):
-    bom_version_id: int
-    line_count: int
-    skipped_rows: int
+    success: bool = True
     project_id: int
+    bom_version_id: int
+    version_name: str
+    rows_imported: int
+    skipped_rows: int
+    missing_mpn_count: int = 0
+    missing_qty_count: int = 0
+    dnp_count: int = 0
+    needs_review_count: int = 0
+    # Backwards-compatible aliases.
+    line_count: int
     version_label: str
