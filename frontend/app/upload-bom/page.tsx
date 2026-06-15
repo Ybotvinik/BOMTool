@@ -9,25 +9,44 @@ import {
   Database,
   CheckCircle2,
   Loader2,
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Rows3,
 } from "lucide-react";
 import { Card, PageHeader, Badge } from "@/components/ui";
-import { apiGet, apiUpload, apiPost } from "@/lib/api";
+import { apiGet, apiBomPreview, apiPost } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
 
 type ApiProject = { id: number; name: string; code: string };
 
+type CandidateRow = {
+  row_index: number;
+  values: string[];
+  non_empty_count: number;
+  keyword_hits: number;
+};
+
 type Preview = {
   file_path: string;
   file_name: string;
+  sheet_name: string;
+  sheet_names: string[];
+  detected_header_row_index: number | null;
+  header_row_index: number | null;
   columns: string[];
   rows: string[][];
   total_rows: number;
+  metadata_rows: string[][];
+  candidate_header_rows: CandidateRow[];
   suggested_mapping: Record<string, string | null>;
+  warning: string | null;
 };
 
 type ImportResult = {
   bom_version_id: number;
   line_count: number;
+  skipped_rows: number;
   project_id: number;
   version_label: string;
 };
@@ -35,13 +54,17 @@ type ImportResult = {
 const FIELDS: { key: string; label: string; required?: boolean }[] = [
   { key: "mpn", label: "MPN", required: true },
   { key: "manufacturer", label: "Manufacturer" },
-  { key: "description", label: "תיאור" },
-  { key: "quantity", label: "Qty" },
-  { key: "reference_designators", label: "Ref Designators" },
+  { key: "description", label: "תיאור / Description" },
+  { key: "quantity", label: "Qty per Assembly" },
+  { key: "reference_designators", label: "Reference Designators" },
+  { key: "footprint", label: "Footprint" },
+  { key: "value", label: "Value" },
+  { key: "supplier_part_number", label: "Supplier Part Number" },
   { key: "unit", label: "Unit" },
   { key: "customer_price", label: "Customer Price" },
   { key: "internal_cost", label: "Internal Cost" },
   { key: "is_critical", label: "Critical" },
+  { key: "dnp", label: "Assembly / DNP" },
 ];
 
 const NONE = "__none__";
@@ -52,11 +75,7 @@ function StepBadge({ n, label, active, done }: { n: number; label: string; activ
       <div
         className={
           "h-6 w-6 rounded-full flex items-center justify-center text-[11px] font-semibold " +
-          (done
-            ? "bg-risk-low text-white"
-            : active
-              ? "bg-brand text-white"
-              : "bg-slate-200 text-slate-500")
+          (done ? "bg-risk-low text-white" : active ? "bg-brand text-white" : "bg-slate-200 text-slate-500")
         }
       >
         {done ? "✓" : n}
@@ -80,6 +99,7 @@ export default function UploadBomPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [showMeta, setShowMeta] = useState(false);
 
   useEffect(() => {
     apiGet<ApiProject[]>("/api/projects")
@@ -90,15 +110,19 @@ export default function UploadBomPage() {
       .catch(() => setError("לא ניתן לטעון פרויקטים — ודא שה-API פעיל."));
   }, []);
 
+  function applyPreview(pv: Preview) {
+    setPreview(pv);
+    setMapping(pv.suggested_mapping);
+  }
+
   async function onFile(file: File | undefined) {
     if (!file) return;
     setError(null);
     setResult(null);
     setBusy(true);
     try {
-      const pv = await apiUpload<Preview>("/api/bom-import/preview", file, user.id);
-      setPreview(pv);
-      setMapping(pv.suggested_mapping);
+      const pv = await apiBomPreview<Preview>({ file, userId: user.id });
+      applyPreview(pv);
       if (!versionLabel) setVersionLabel(`v${new Date().toISOString().slice(0, 10)}`);
     } catch (e) {
       setError(String(e));
@@ -108,8 +132,32 @@ export default function UploadBomPage() {
     }
   }
 
+  // Re-preview an already-uploaded file with a different header row / sheet.
+  async function rePreview(opts: { headerRowIndex?: number; sheetName?: string }) {
+    if (!preview) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const pv = await apiBomPreview<Preview>({
+        filePath: preview.file_path,
+        headerRowIndex: opts.headerRowIndex,
+        sheetName: opts.sheetName ?? preview.sheet_name,
+        userId: user.id,
+      });
+      applyPreview(pv);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function doImport() {
     if (!preview || !projectId) return;
+    if (preview.header_row_index == null) {
+      setError("יש לבחור שורת כותרות לפני הייבוא.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -121,6 +169,8 @@ export default function UploadBomPage() {
           status: "In Review",
           source: "excel-import",
           file_path: preview.file_path,
+          sheet_name: preview.sheet_name,
+          header_row_index: preview.header_row_index,
           mapping,
           set_active: setActive,
         },
@@ -135,12 +185,15 @@ export default function UploadBomPage() {
   }
 
   const step = result ? 4 : preview ? 3 : 1;
+  const headerHuman = preview?.header_row_index != null ? preview.header_row_index + 1 : null;
+  const detectedHuman =
+    preview?.detected_header_row_index != null ? preview.detected_header_row_index + 1 : null;
 
   return (
     <>
       <PageHeader
         title="טעינת BOM"
-        subtitle="העלאת קובץ Excel/CSV, מיפוי עמודות וייבוא לבסיס הנתונים"
+        subtitle="העלאת קובץ Excel/CSV, זיהוי שורת כותרות, מיפוי עמודות וייבוא לבסיס הנתונים"
       />
 
       <Card className="p-3 mb-3">
@@ -166,12 +219,14 @@ export default function UploadBomPage() {
           <div className="flex items-center gap-3 mb-3">
             <CheckCircle2 className="h-7 w-7 text-risk-low" />
             <div>
-              <div className="text-[15px] font-semibold text-slate-800">
-                הייבוא הושלם בהצלחה
-              </div>
+              <div className="text-[15px] font-semibold text-slate-800">הייבוא הושלם בהצלחה</div>
               <div className="text-[12.5px] text-slate-500">
                 נוצרה גרסת BOM ‏«{result.version_label}» עם{" "}
-                <span className="font-semibold">{result.line_count}</span> שורות.
+                <span className="font-semibold">{result.line_count}</span> שורות
+                {result.skipped_rows > 0 && (
+                  <> · ‏{result.skipped_rows} שורות לא תקינות דולגו</>
+                )}
+                .
               </div>
             </div>
           </div>
@@ -226,11 +281,7 @@ export default function UploadBomPage() {
               />
             </div>
             <label className="flex items-center gap-2 text-[12.5px] text-slate-700">
-              <input
-                type="checkbox"
-                checked={setActive}
-                onChange={(e) => setSetActive(e.target.checked)}
-              />
+              <input type="checkbox" checked={setActive} onChange={(e) => setSetActive(e.target.checked)} />
               קבע כגרסה פעילה
             </label>
 
@@ -253,13 +304,96 @@ export default function UploadBomPage() {
             </label>
 
             {preview && (
-              <div className="flex items-center gap-2 text-[12px] text-slate-600">
-                <FileSpreadsheet className="h-4 w-4 text-risk-low" />
-                <span className="font-medium truncate">{preview.file_name}</span>
-                <Badge className="bg-brand-soft text-brand border-brand/30">
-                  {preview.total_rows} שורות
-                </Badge>
-              </div>
+              <>
+                <div className="flex items-center gap-2 text-[12px] text-slate-600">
+                  <FileSpreadsheet className="h-4 w-4 text-risk-low" />
+                  <span className="font-medium truncate">{preview.file_name}</span>
+                  <Badge className="bg-brand-soft text-brand border-brand/30">
+                    {preview.total_rows} שורות
+                  </Badge>
+                </div>
+
+                {preview.sheet_names.length > 1 && (
+                  <div>
+                    <label className="block text-[12px] text-slate-600 mb-1">גליון (Sheet)</label>
+                    <select
+                      value={preview.sheet_name}
+                      onChange={(e) => rePreview({ sheetName: e.target.value })}
+                      className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
+                    >
+                      {preview.sheet_names.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Header row selector */}
+                <div className="rounded-md border border-slate-200 p-2.5 space-y-2">
+                  <div className="flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+                    <Rows3 className="h-3.5 w-3.5 text-brand" /> שורת כותרות בטבלה (Header Row)
+                  </div>
+                  <div className="text-[10.5px] text-slate-500">
+                    {detectedHuman != null
+                      ? `זוהתה אוטומטית: שורה ${detectedHuman}`
+                      : "לא זוהתה שורת כותרות — יש לבחור ידנית"}
+                  </div>
+                  <select
+                    value={preview.header_row_index ?? ""}
+                    onChange={(e) => rePreview({ headerRowIndex: Number(e.target.value) })}
+                    className="w-full h-8 rounded-md border border-slate-200 px-2 text-[12px] bg-white"
+                  >
+                    {preview.header_row_index == null && <option value="">— בחר שורה —</option>}
+                    {preview.candidate_header_rows.map((c) => (
+                      <option key={c.row_index} value={c.row_index}>
+                        שורה {c.row_index + 1}
+                        {c.keyword_hits > 0 ? ` ★${c.keyword_hits}` : ""} —{" "}
+                        {c.values.filter(Boolean).slice(0, 4).join(" | ")}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10.5px] text-slate-500">בחירה ידנית (מס׳ שורה):</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={headerHuman ?? ""}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        if (v >= 1) rePreview({ headerRowIndex: v - 1 });
+                      }}
+                      className="w-20 h-8 rounded-md border border-slate-200 px-2 text-[12px]"
+                    />
+                  </div>
+                </div>
+
+                {/* Metadata above header */}
+                {preview.metadata_rows.length > 0 && (
+                  <div className="rounded-md border border-slate-200">
+                    <button
+                      onClick={() => setShowMeta((s) => !s)}
+                      className="w-full flex items-center gap-1.5 px-2.5 py-2 text-[12px] text-slate-700 hover:bg-slate-50"
+                    >
+                      {showMeta ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                      מידע שנמצא מעל טבלת ה-BOM ({preview.metadata_rows.length})
+                    </button>
+                    {showMeta && (
+                      <div className="px-3 pb-2 space-y-1">
+                        {preview.metadata_rows.map((r, i) => (
+                          <div key={i} className="text-[11px] text-slate-500">
+                            {r.filter(Boolean).join(" · ")}
+                          </div>
+                        ))}
+                        <div className="text-[10px] text-slate-400 pt-1">
+                          שורות אלו לא ישמשו למיפוי עמודות ולא ייובאו.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </Card>
 
@@ -270,78 +404,98 @@ export default function UploadBomPage() {
               </div>
             ) : (
               <>
+                {preview.warning && (
+                  <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 text-[12px] px-3 py-2">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{preview.warning}</span>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 mb-2">
                   <Table2 className="h-4 w-4 text-brand" />
                   <h2 className="text-[13.5px] font-semibold">תצוגה מקדימה</h2>
-                  <span className="text-[11px] text-slate-400">
-                    ({preview.rows.length} מתוך {preview.total_rows})
-                  </span>
+                  {headerHuman != null && (
+                    <span className="text-[11px] text-slate-400">
+                      (שורת כותרות: שורה {headerHuman} · {preview.rows.length} מתוך {preview.total_rows})
+                    </span>
+                  )}
                 </div>
-                <div className="overflow-auto border border-slate-200 rounded-md mb-4 max-h-56">
-                  <table className="w-full text-[11.5px]">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr className="text-right text-slate-500">
-                        {preview.columns.map((c) => (
-                          <th key={c} className="px-2 py-1.5 font-medium whitespace-nowrap">
-                            {c}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {preview.rows.map((r, i) => (
-                        <tr key={i} className="border-t border-slate-100">
-                          {preview.columns.map((_, j) => (
-                            <td key={j} className="px-2 py-1 whitespace-nowrap text-slate-700">
-                              {r[j] ?? ""}
-                            </td>
+
+                {preview.columns.length > 0 ? (
+                  <div className="overflow-auto border border-slate-200 rounded-md mb-4 max-h-56">
+                    <table className="w-full text-[11.5px]">
+                      <thead className="bg-brand-soft sticky top-0">
+                        <tr className="text-right text-brand">
+                          {preview.columns.map((c, i) => (
+                            <th key={i} className="px-2 py-1.5 font-semibold whitespace-nowrap border-b border-brand/20">
+                              {c || <span className="text-slate-300">—</span>}
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex items-center gap-2 mb-2">
-                  <Database className="h-4 w-4 text-brand" />
-                  <h2 className="text-[13.5px] font-semibold">מיפוי עמודות</h2>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
-                  {FIELDS.map((f) => (
-                    <div key={f.key}>
-                      <label className="block text-[11px] text-slate-600 mb-1">
-                        {f.label}
-                        {f.required && <span className="text-red-500"> *</span>}
-                      </label>
-                      <select
-                        value={mapping[f.key] ?? NONE}
-                        onChange={(e) =>
-                          setMapping((m) => ({
-                            ...m,
-                            [f.key]: e.target.value === NONE ? null : e.target.value,
-                          }))
-                        }
-                        className="w-full h-8 rounded-md border border-slate-200 px-2 text-[12px] bg-white"
-                      >
-                        <option value={NONE}>— ללא —</option>
-                        {preview.columns.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
+                      </thead>
+                      <tbody>
+                        {preview.rows.map((r, i) => (
+                          <tr key={i} className="border-t border-slate-100">
+                            {preview.columns.map((_, j) => (
+                              <td key={j} className="px-2 py-1 whitespace-nowrap text-slate-700">
+                                {r[j] ?? ""}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </select>
-                    </div>
-                  ))}
-                </div>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-[12px] text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-md mb-4">
+                    בחר שורת כותרות כדי להציג עמודות ושורות.
+                  </div>
+                )}
 
-                <button
-                  onClick={doImport}
-                  disabled={busy || !projectId}
-                  className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
-                  ייבוא ל-DB
-                </button>
+                {preview.columns.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Database className="h-4 w-4 text-brand" />
+                      <h2 className="text-[13.5px] font-semibold">מיפוי עמודות</h2>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
+                      {FIELDS.map((f) => (
+                        <div key={f.key}>
+                          <label className="block text-[11px] text-slate-600 mb-1">
+                            {f.label}
+                            {f.required && <span className="text-red-500"> *</span>}
+                          </label>
+                          <select
+                            value={mapping[f.key] ?? NONE}
+                            onChange={(e) =>
+                              setMapping((m) => ({
+                                ...m,
+                                [f.key]: e.target.value === NONE ? null : e.target.value,
+                              }))
+                            }
+                            className="w-full h-8 rounded-md border border-slate-200 px-2 text-[12px] bg-white"
+                          >
+                            <option value={NONE}>— ללא —</option>
+                            {preview.columns.filter(Boolean).map((c, i) => (
+                              <option key={i} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={doImport}
+                      disabled={busy || !projectId}
+                      className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+                    >
+                      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                      ייבוא ל-DB
+                    </button>
+                  </>
+                )}
               </>
             )}
           </Card>

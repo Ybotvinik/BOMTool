@@ -54,3 +54,26 @@ export async function apiUpload<T>(
   if (!res.ok) await parseError(res, path, "POST");
   return res.json() as Promise<T>;
 }
+
+// BOM preview supports either a fresh file upload or re-previewing a stored file
+// (file_path) with an optional header-row / sheet override.
+export async function apiBomPreview<T>(opts: {
+  file?: File;
+  filePath?: string;
+  headerRowIndex?: number;
+  sheetName?: string;
+  userId?: number;
+}): Promise<T> {
+  const path = "/api/bom-import/preview";
+  const form = new FormData();
+  if (opts.file) form.append("file", opts.file);
+  if (opts.filePath) form.append("file_path", opts.filePath);
+  if (opts.headerRowIndex != null)
+    form.append("header_row_index", String(opts.headerRowIndex));
+  if (opts.sheetName) form.append("sheet_name", opts.sheetName);
+  const headers: Record<string, string> = {};
+  if (opts.userId != null) headers["X-User-Id"] = String(opts.userId);
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form });
+  if (!res.ok) await parseError(res, path, "POST");
+  return res.json() as Promise<T>;
+}

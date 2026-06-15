@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -25,6 +35,13 @@ class BomLine(Base):
     customer_price: Mapped[float | None] = mapped_column(Numeric(14, 4))
     internal_cost: Mapped[float | None] = mapped_column(Numeric(14, 4))
     is_critical: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # PCB / SMT assembly BOM fields.
+    footprint: Mapped[str | None] = mapped_column(String(120))
+    value: Mapped[str | None] = mapped_column(String(120))
+    supplier_part_number: Mapped[str | None] = mapped_column(String(120))
+    dnp: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

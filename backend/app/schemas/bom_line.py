@@ -14,10 +14,14 @@ class BomLineBase(BaseModel):
     description: str | None = None
     quantity: Decimal = Decimal(0)
     reference_designators: str | None = None
+    footprint: str | None = None
+    value: str | None = None
+    supplier_part_number: str | None = None
     unit: str | None = None
     customer_price: Decimal | None = None
     internal_cost: Decimal | None = None
     is_critical: bool = False
+    dnp: bool = False
     notes: str | None = None
 
 
@@ -32,10 +36,14 @@ class BomLineUpdate(BaseModel):
     description: str | None = None
     quantity: Decimal | None = None
     reference_designators: str | None = None
+    footprint: str | None = None
+    value: str | None = None
+    supplier_part_number: str | None = None
     unit: str | None = None
     customer_price: Decimal | None = None
     internal_cost: Decimal | None = None
     is_critical: bool | None = None
+    dnp: bool | None = None
     notes: str | None = None
 
 
