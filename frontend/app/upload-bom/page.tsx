@@ -66,6 +66,11 @@ type ImportResult = {
   dnp_count: number;
   needs_review_count: number;
   project_id: number;
+  total_rows_scanned: number;
+  empty_rows_skipped: number;
+  invalid_rows_skipped: number;
+  rows_needing_review: number;
+  skipped_rows_sample: string[];
 };
 
 const FIELDS: { key: string; label: string; required?: boolean }[] = [
@@ -252,14 +257,26 @@ export default function UploadBomPage() {
               <div className="text-[15px] font-semibold text-slate-800">הייבוא הושלם בהצלחה</div>
               <div className="text-[12.5px] text-slate-500">
                 נוצרה גרסת BOM ‏«{result.version_name}» (#{result.bom_version_id}) עם{" "}
-                <span className="font-semibold">{result.rows_imported}</span> שורות
-                {result.skipped_rows > 0 && (
-                  <> · ‏{result.skipped_rows} שורות לא תקינות דולגו</>
-                )}
-                .
+                <span className="font-semibold">{result.rows_imported}</span> שורות.
               </div>
             </div>
           </div>
+          {result.rows_imported === 0 && (
+            <div className="mb-3 rounded-md border border-red-200 bg-red-50 text-red-700 text-[12.5px] px-3 py-2">
+              לא יובאו שורות BOM. נסרקו {result.total_rows_scanned} שורות. ודא מיפוי עמודות ושורת כותרות נכונה.
+            </div>
+          )}
+          <div className="mb-3 text-[11.5px] text-slate-500">
+            סך נסרקו {result.total_rows_scanned} · יובאו {result.rows_imported} · שורות ריקות שדולגו {result.empty_rows_skipped} · שורות לא תקינות שדולגו {result.invalid_rows_skipped} · נדרשות בדיקה {result.rows_needing_review}
+          </div>
+          {result.skipped_rows_sample && result.skipped_rows_sample.length > 0 && (
+            <div className="mb-3 rounded-md border border-slate-200 bg-slate-50 p-2.5">
+              <div className="text-[11px] text-slate-500 mb-1">דוגמאות לשורות שדולגו:</div>
+              {result.skipped_rows_sample.map((s, i) => (
+                <div key={i} className="text-[11px] text-slate-600 font-mono truncate">{s}</div>
+              ))}
+            </div>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
             <div className="rounded-md border border-slate-200 p-2.5">
               <div className="text-[10.5px] text-slate-500">Rows Imported</div>

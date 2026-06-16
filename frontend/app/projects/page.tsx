@@ -3,7 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, Upload, FolderOpen, RefreshCw, Pencil, Trash2 } from "lucide-react";
-import { Card, PageHeader, Kpi, StatusBadge } from "@/components/ui";
+import { Card, PageHeader, Kpi, StatusBadge, Badge } from "@/components/ui";
+
+function QualityScore({ score }: { score: number | null }) {
+  if (score == null) return <span className="text-slate-400">—</span>;
+  const cls =
+    score >= 90
+      ? "bg-green-50 text-risk-low border-green-200"
+      : score >= 70
+        ? "bg-amber-50 text-amber-700 border-amber-200"
+        : "bg-red-50 text-risk-critical border-red-200";
+  return <Badge className={cls}>{score}</Badge>;
+}
 import { projects as mockProjects, type Project } from "@/lib/mock-data";
 import { API_URL, apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
@@ -25,12 +36,23 @@ type ApiProject = {
 
 type ApiCustomer = { id: number; name: string; code: string | null };
 type ApiVersion = { id: number; version_label: string; version_name: string | null };
+type Metrics = {
+  project_id: number;
+  active_bom_version_name: string | null;
+  bom_quality_score: number | null;
+  bom_needs_review_count: number;
+  latest_internal_cost: number | null;
+  latest_internal_cost_currency: string | null;
+  latest_pricing_snapshot_id: number | null;
+  missing_price_count: number;
+};
 
 export default function ProjectsPage() {
   const { user } = useCurrentUser();
   const [apiRows, setApiRows] = useState<ApiProject[]>([]);
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
   const [versions, setVersions] = useState<ApiVersion[]>([]);
+  const [metrics, setMetrics] = useState<Record<number, Metrics>>({});
   const [live, setLive] = useState(false);
   const [creating, setCreating] = useState(false);
 
@@ -50,14 +72,16 @@ export default function ProjectsPage() {
 
   async function load() {
     try {
-      const [ps, cs, vs] = await Promise.all([
+      const [ps, cs, vs, ms] = await Promise.all([
         apiGet<ApiProject[]>("/api/projects"),
         apiGet<ApiCustomer[]>("/api/customers"),
         apiGet<ApiVersion[]>("/api/bom-versions"),
+        apiGet<Metrics[]>("/api/projects/metrics").catch(() => [] as Metrics[]),
       ]);
       setApiRows(ps);
       setCustomers(cs);
       setVersions(vs);
+      setMetrics(Object.fromEntries(ms.map((m) => [m.project_id, m])));
       setLive(true);
     } catch {
       setLive(false);
@@ -170,6 +194,12 @@ export default function ProjectsPage() {
   const inReview = live
     ? apiRows.filter((p) => p.status === "In Review").length
     : mockRows.filter((p) => p.status === "In Review").length;
+  const needsReviewTotal = Object.values(metrics).reduce(
+    (s, m) => s + (m.bom_needs_review_count || 0),
+    0,
+  );
+  const money = (v: number | null | undefined, ccy: string | null | undefined) =>
+    v == null ? "—" : `${Math.round(v).toLocaleString()} ${ccy ?? ""}`.trim();
 
   return (
     <>
@@ -215,10 +245,11 @@ export default function ProjectsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
         <Kpi label="סה״כ פרויקטים" value={total} />
         <Kpi label="פרויקטים פעילים" value={active} tone="good" />
         <Kpi label="BOMs בבדיקה" value={inReview} tone="warn" />
+        <Kpi label="רכיבים לבדיקה" value={live ? needsReviewTotal : "—"} tone="bad" />
         <Kpi label="דוחות שהופקו החודש" value={18} hint="יוני 2026" />
       </div>
 
@@ -229,10 +260,13 @@ export default function ProjectsPage() {
               <th className="px-3 py-2 font-medium">לקוח</th>
               <th className="px-3 py-2 font-medium">שם פרויקט</th>
               <th className="px-3 py-2 font-medium">קוד פרויקט</th>
-              <th className="px-3 py-2 font-medium">Active BOM Version</th>
+              <th className="px-3 py-2 font-medium">Active BOM</th>
+              <th className="px-3 py-2 font-medium text-center">Quality</th>
+              <th className="px-3 py-2 font-medium text-center">Needs Review</th>
+              <th className="px-3 py-2 font-medium">Internal Cost</th>
+              <th className="px-3 py-2 font-medium text-center">Missing Prices</th>
               <th className="px-3 py-2 font-medium">סטטוס</th>
-              <th className="px-3 py-2 font-medium">Build Qty</th>
-              <th className="px-3 py-2 font-medium">עודכן לאחרונה</th>
+              <th className="px-3 py-2 font-medium">עודכן</th>
               {live && <th className="px-3 py-2 font-medium text-center">פעולות</th>}
             </tr>
           </thead>
@@ -247,11 +281,34 @@ export default function ProjectsPage() {
                       </Link>
                     </td>
                     <td className="px-3 py-2 text-slate-500 tabular-nums">{p.code}</td>
-                    <td className="px-3 py-2 tabular-nums">{versionName(p.active_version_id)}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {metrics[p.id]?.active_bom_version_name ?? versionName(p.active_version_id)}
+                    </td>
+                    <td className="px-3 py-2 text-center"><QualityScore score={metrics[p.id]?.bom_quality_score ?? null} /></td>
+                    <td className="px-3 py-2 text-center tabular-nums">
+                      {metrics[p.id] ? (
+                        metrics[p.id].bom_needs_review_count > 0 ? (
+                          <Badge className="bg-amber-50 text-amber-700 border-amber-200">{metrics[p.id].bom_needs_review_count}</Badge>
+                        ) : <span className="text-slate-400">0</span>
+                      ) : "—"}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {metrics[p.id]?.latest_pricing_snapshot_id ? (
+                        <Link href={`/pricing-snapshots/${metrics[p.id].latest_pricing_snapshot_id}`} className="text-brand hover:underline">
+                          {money(metrics[p.id].latest_internal_cost, metrics[p.id].latest_internal_cost_currency)}
+                        </Link>
+                      ) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-center tabular-nums">
+                      {metrics[p.id] ? (
+                        metrics[p.id].missing_price_count > 0 ? (
+                          <Badge className="bg-red-50 text-risk-critical border-red-200">{metrics[p.id].missing_price_count}</Badge>
+                        ) : <span className="text-slate-400">0</span>
+                      ) : "—"}
+                    </td>
                     <td className="px-3 py-2">
                       <StatusBadge status={p.status} />
                     </td>
-                    <td className="px-3 py-2 tabular-nums">{p.build_quantity}</td>
                     <td className="px-3 py-2 text-slate-500 tabular-nums">
                       {p.updated_at?.slice(0, 10)}
                     </td>
@@ -284,10 +341,13 @@ export default function ProjectsPage() {
                     <td className="px-3 py-2 text-brand font-medium">{p.name}</td>
                     <td className="px-3 py-2 text-slate-500 tabular-nums">{p.code}</td>
                     <td className="px-3 py-2 tabular-nums">{p.activeVersion}</td>
+                    <td className="px-3 py-2 text-center text-slate-400">—</td>
+                    <td className="px-3 py-2 text-center text-slate-400">—</td>
+                    <td className="px-3 py-2 text-slate-400">—</td>
+                    <td className="px-3 py-2 text-center text-slate-400">—</td>
                     <td className="px-3 py-2">
                       <StatusBadge status={p.status} />
                     </td>
-                    <td className="px-3 py-2 tabular-nums">—</td>
                     <td className="px-3 py-2 text-slate-500 tabular-nums">{p.lastUpdated}</td>
                   </tr>
                 ))}

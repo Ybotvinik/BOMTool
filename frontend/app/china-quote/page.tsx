@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { UploadCloud, Loader2, Database, DollarSign, RefreshCw, Lock, Table2 } from "lucide-react";
 import { Card, PageHeader, Kpi, Badge } from "@/components/ui";
-import { apiGet, apiPost, apiChinaPreview } from "@/lib/api";
+import { apiGet, apiPost, apiPatch, apiChinaPreview } from "@/lib/api";
+import Link from "next/link";
 import { useCurrentUser } from "@/lib/current-user";
 
 type ApiProject = { id: number; name: string };
@@ -28,7 +29,13 @@ type ImportResult = {
   not_matched_count: number;
   currency: string;
   quote_name: string;
+  total_rows_scanned: number;
+  lines_skipped: number;
+  missing_mpn_count: number;
+  missing_price_count: number;
+  skipped_rows_sample: string[];
 };
+type BomLineLite = { id: number; line_no: number | null; mpn: string | null };
 type QuoteLine = {
   id: number;
   quoted_mpn: string | null;
@@ -95,6 +102,8 @@ export default function ChinaQuotePage() {
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [matchLine, setMatchLine] = useState<QuoteLine | null>(null);
+  const [bomLines, setBomLines] = useState<BomLineLite[]>([]);
 
   useEffect(() => {
     apiGet<ApiProject[]>("/api/projects").then((ps) => {
@@ -191,6 +200,34 @@ export default function ChinaQuotePage() {
     try {
       await apiPost(`/api/china-quotes/${quoteId}/match`, {}, user.id);
       await loadQuoteLines(quoteId);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openMatch(line: QuoteLine) {
+    setMatchLine(line);
+    if (versionId != null && bomLines.length === 0) {
+      try {
+        const bls = await apiGet<BomLineLite[]>(`/api/bom-versions/${versionId}/lines`);
+        setBomLines(bls);
+      } catch {
+        setBomLines([]);
+      }
+    }
+  }
+
+  async function saveMatch(bomLineId: number | null, matchStatus: string) {
+    if (matchLine == null) return;
+    setBusy(true);
+    try {
+      await apiPatch(
+        `/api/china-quotes/lines/${matchLine.id}/match`,
+        { bom_line_id: bomLineId, match_status: matchStatus, match_reason: "Manual match" },
+        user.id,
+      );
+      setMatchLine(null);
+      if (quoteId != null) await loadQuoteLines(quoteId);
     } finally {
       setBusy(false);
     }
@@ -340,26 +377,42 @@ export default function ChinaQuotePage() {
 
       {/* Import summary cards */}
       {result && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
-          <Kpi label="Lines Imported" value={result.lines_imported} />
-          <Kpi label="Matched" value={result.matched_count} tone="good" />
-          <Kpi label="Possible Match" value={result.possible_match_count} tone="warn" />
-          <Kpi label="Not Matched" value={result.not_matched_count} tone="bad" />
-          <Kpi label="Currency" value={result.currency} />
-        </div>
+        <>
+          {result.lines_imported === 0 && (
+            <div className="mb-3 rounded-md border border-red-200 bg-red-50 text-red-700 text-[12.5px] px-3 py-2">
+              לא יובאו שורות. נסרקו {result.total_rows_scanned} שורות, {result.lines_skipped} דולגו. ודא מיפוי עמודות ושורת כותרות נכונה.
+            </div>
+          )}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-2">
+            <Kpi label="Lines Imported" value={result.lines_imported} />
+            <Kpi label="Matched" value={result.matched_count} tone="good" />
+            <Kpi label="Possible Match" value={result.possible_match_count} tone="warn" />
+            <Kpi label="Not Matched" value={result.not_matched_count} tone="bad" />
+            <Kpi label="Currency" value={result.currency} />
+          </div>
+          <div className="mb-3 text-[11.5px] text-slate-500">
+            סך נסרקו {result.total_rows_scanned} · דולגו {result.lines_skipped} · חסר MPN {result.missing_mpn_count} · חסר מחיר {result.missing_price_count}
+          </div>
+        </>
       )}
 
       {/* Pricing result */}
       {pricing && (
         <Card className="p-3 mb-3 border-brand/30">
           <div className="text-[13px] font-semibold text-navy mb-2">Pricing Snapshot נוצר (#{pricing.pricing_snapshot_id})</div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
             <Kpi label="Total Internal Cost" value={`${pricing.total_internal_cost.toLocaleString()} ${pricing.currency}`} tone="good" />
             <Kpi label="Priced" value={pricing.priced_count} tone="good" />
             <Kpi label="Missing Prices" value={pricing.missing_price_count} tone="bad" />
             <Kpi label="Needs Review" value={pricing.needs_review_count} tone="warn" />
             <Kpi label="Currency" value={pricing.currency} />
           </div>
+          <Link
+            href={`/pricing-snapshots/${pricing.pricing_snapshot_id}`}
+            className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90"
+          >
+            <Table2 className="h-4 w-4" /> פתח Pricing Snapshot
+          </Link>
         </Card>
       )}
 
@@ -394,6 +447,7 @@ export default function ChinaQuotePage() {
                   <th className="px-2 py-2 font-medium">Matched BOM MPN</th>
                   <th className="px-2 py-2 font-medium text-center">Confidence</th>
                   <th className="px-2 py-2 font-medium">Reason</th>
+                  <th className="px-2 py-2 font-medium text-center">פעולות</th>
                 </tr>
               </thead>
               <tbody>
@@ -410,6 +464,9 @@ export default function ChinaQuotePage() {
                     <td className="px-2 py-1.5 tabular-nums">{l.matched_bom_line?.mpn || "—"}</td>
                     <td className="px-2 py-1.5 text-center tabular-nums">{l.match_confidence}</td>
                     <td className="px-2 py-1.5 text-[11px] text-slate-500 max-w-[180px] truncate" title={l.match_reason ?? ""}>{l.match_reason || "—"}</td>
+                    <td className="px-2 py-1.5 text-center">
+                      <button onClick={() => openMatch(l)} className="h-7 px-2 rounded-md hover:bg-slate-100 text-[11px] text-brand">עדכן התאמה</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -417,7 +474,76 @@ export default function ChinaQuotePage() {
           </div>
         </Card>
       )}
+
+      {matchLine && (
+        <MatchModal
+          line={matchLine}
+          bomLines={bomLines}
+          busy={busy}
+          onClose={() => setMatchLine(null)}
+          onSave={saveMatch}
+        />
+      )}
     </>
+  );
+}
+
+function MatchModal({
+  line,
+  bomLines,
+  busy,
+  onClose,
+  onSave,
+}: {
+  line: QuoteLine;
+  bomLines: BomLineLite[];
+  busy: boolean;
+  onClose: () => void;
+  onSave: (bomLineId: number | null, status: string) => void;
+}) {
+  const [bomLineId, setBomLineId] = useState<string>(String(line.matched_bom_line?.mpn ? "" : ""));
+  const [matchStatus, setMatchStatus] = useState("matched");
+  const [search, setSearch] = useState("");
+  const filtered = bomLines.filter((b) =>
+    !search ? true : (b.mpn ?? "").toLowerCase().includes(search.toLowerCase()),
+  );
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
+      <div dir="rtl" className="w-full max-w-md rounded-lg bg-white shadow-xl border border-slate-200">
+        <div className="px-4 py-3 border-b border-slate-200 text-[14px] font-semibold text-navy">עדכון התאמה ({line.quoted_mpn || "—"})</div>
+        <div className="p-4 space-y-3">
+          <div>
+            <label className="block text-[11px] text-slate-600 mb-1">חיפוש שורת BOM</label>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="MPN" className={sel} />
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-600 mb-1">שורת BOM</label>
+            <select value={bomLineId} onChange={(e) => setBomLineId(e.target.value)} className={sel}>
+              <option value="">— ללא (Not matched) —</option>
+              {filtered.map((b) => (
+                <option key={b.id} value={b.id}>#{b.line_no} · {b.mpn || "—"}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-600 mb-1">סטטוס התאמה</label>
+            <select value={matchStatus} onChange={(e) => setMatchStatus(e.target.value)} className={sel}>
+              {["matched", "possible_match", "not_matched"].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-start gap-2">
+          <button
+            onClick={() => onSave(bomLineId === "" ? null : Number(bomLineId), bomLineId === "" ? "not_matched" : matchStatus)}
+            disabled={busy}
+            className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+          >
+            {busy ? "שומר..." : "שמירה"}
+          </button>
+          <button onClick={onClose} disabled={busy} className="h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] hover:bg-slate-50">ביטול</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
