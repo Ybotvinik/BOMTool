@@ -12,6 +12,7 @@ from app.database import get_db
 from app.deps import get_current_user_id
 from app.models import BomVersion, Project, SupplierQuote, SupplierQuoteLine
 from app.schemas.china_quote import (
+    ChinaMatchUpdate,
     ChinaQuoteImport,
     ChinaQuoteImportResult,
     ChinaQuotePreview,
@@ -172,14 +173,27 @@ def import_china_quote(
     db.add(quote)
     db.flush()
 
+    data_rows = rows[header_index + 1 :]
     lines_imported = 0
-    for row in rows[header_index + 1 :]:
+    lines_skipped = 0
+    missing_mpn = 0
+    missing_price = 0
+    skipped_sample: list[str] = []
+    for row in data_rows:
         if not any(c.strip() for c in row):
+            lines_skipped += 1
             continue
         quoted_mpn = cell(row, "quoted_mpn")
         if not quoted_mpn and not cell(row, "supplier_part_number"):
+            lines_skipped += 1
+            if len(skipped_sample) < 5:
+                skipped_sample.append(" | ".join(c for c in row if c.strip())[:160])
             continue
         lines_imported += 1
+        if not quoted_mpn:
+            missing_mpn += 1
+        if _to_decimal(cell(row, "unit_price")) is None:
+            missing_price += 1
         currency = cell(row, "currency") or payload.currency or "USD"
         db.add(
             SupplierQuoteLine(
@@ -230,6 +244,11 @@ def import_china_quote(
         currency=quote.currency,
         quote_name=quote.quote_name or "",
         supplier_name=quote.supplier_name,
+        total_rows_scanned=len(data_rows),
+        lines_skipped=lines_skipped,
+        missing_mpn_count=missing_mpn,
+        missing_price_count=missing_price,
+        skipped_rows_sample=skipped_sample,
     )
 
 
@@ -305,6 +324,60 @@ def rematch_quote(
     )
     db.commit()
     return {"supplier_quote_id": supplier_quote_id, **summary}
+
+
+@router.patch("/lines/{quote_line_id}/match")
+def update_line_match(
+    quote_line_id: int,
+    payload: ChinaMatchUpdate,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    """Manually assign a quote line to a BOM line."""
+    from app.models import BomLine
+
+    line = db.get(SupplierQuoteLine, quote_line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="שורת הצעת מחיר לא נמצאה")
+    if payload.bom_line_id is not None:
+        bl = db.get(BomLine, payload.bom_line_id)
+        if bl is None:
+            raise HTTPException(status_code=404, detail="שורת BOM לא נמצאה")
+        line.matched_bom_line_id = bl.id
+    elif payload.bom_line_id is None and "bom_line_id" in payload.model_dump(exclude_unset=True):
+        line.matched_bom_line_id = None
+
+    line.match_status = payload.match_status or ("matched" if line.matched_bom_line_id else "not_matched")
+    line.match_confidence = (
+        payload.match_confidence
+        if payload.match_confidence is not None
+        else (100 if line.matched_bom_line_id else 0)
+    )
+    line.match_reason = payload.match_reason or "Manual match"
+
+    quote = db.get(SupplierQuote, line.supplier_quote_id)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="china_quote_match_updated",
+        project_id=quote.project_id if quote else None,
+        entity_type="supplier_quote_line",
+        entity_name=line.quoted_mpn,
+        change_summary=(
+            f"Manual match for '{line.quoted_mpn}' -> BOM line {line.matched_bom_line_id} "
+            f"({line.match_status}, conf {line.match_confidence})"
+        ),
+        commit=False,
+    )
+    db.commit()
+    db.refresh(line)
+    return {
+        "id": line.id,
+        "matched_bom_line_id": line.matched_bom_line_id,
+        "match_status": line.match_status,
+        "match_confidence": line.match_confidence,
+        "match_reason": line.match_reason,
+    }
 
 
 @project_router.get("/{project_id}/china-quotes", response_model=list[ChinaQuoteRead])

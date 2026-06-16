@@ -19,6 +19,7 @@ from app.models import (
 )
 from app.schemas.pricing import (
     PricingFromChinaQuote,
+    PricingLineEdit,
     PricingSnapshotRead,
     PricingSnapshotResult,
 )
@@ -26,6 +27,7 @@ from app.services.activity import log_activity
 from app.services.bom_quality import compute_required_qty
 
 router = APIRouter(prefix="/pricing-snapshots", tags=["pricing"])
+lines_router = APIRouter(prefix="/pricing-lines", tags=["pricing"])
 project_router = APIRouter(prefix="/projects", tags=["pricing"])
 
 
@@ -177,13 +179,27 @@ def get_snapshot(pricing_snapshot_id: int, db: Session = Depends(get_db)) -> dic
     priced = sum(1 for l in lines if l.pricing_status == "priced")
     missing = sum(1 for l in lines if l.pricing_status == "missing_price")
     needs = sum(1 for l in lines if l.pricing_status == "needs_review")
+
+    # Enrich with BOM line manufacturer/description.
+    bom_ids = [l.bom_line_id for l in lines if l.bom_line_id is not None]
+    bom_map: dict[int, BomLine] = {}
+    if bom_ids:
+        for bl in db.scalars(select(BomLine).where(BomLine.id.in_(bom_ids))):
+            bom_map[bl.id] = bl
+
+    version = db.get(BomVersion, snap.bom_version_id) if snap.bom_version_id else None
+    project = db.get(Project, snap.project_id)
+    quote = db.get(SupplierQuote, snap.supplier_quote_id) if snap.supplier_quote_id else None
     return {
         "id": snap.id,
         "project_id": snap.project_id,
+        "project_name": project.name if project else None,
         "bom_version_id": snap.bom_version_id,
+        "bom_version_name": (version.version_name or version.version_label) if version else None,
         "snapshot_name": snap.snapshot_name or snap.name,
         "source_type": snap.source_type,
         "supplier_quote_id": snap.supplier_quote_id,
+        "supplier_quote_name": quote.quote_name if quote else None,
         "currency": snap.currency,
         "status": snap.status,
         "created_at": snap.created_at.isoformat() if snap.created_at else None,
@@ -196,6 +212,8 @@ def get_snapshot(pricing_snapshot_id: int, db: Session = Depends(get_db)) -> dic
                 "id": l.id,
                 "bom_line_id": l.bom_line_id,
                 "mpn": l.mpn,
+                "manufacturer": bom_map[l.bom_line_id].manufacturer if l.bom_line_id in bom_map else None,
+                "description": bom_map[l.bom_line_id].description if l.bom_line_id in bom_map else None,
                 "selected_source": l.selected_source,
                 "required_qty": float(l.required_qty) if l.required_qty is not None else None,
                 "unit_cost": float(l.unit_cost) if l.unit_cost is not None else None,
@@ -203,9 +221,80 @@ def get_snapshot(pricing_snapshot_id: int, db: Session = Depends(get_db)) -> dic
                 "currency": l.currency,
                 "match_confidence": l.match_confidence,
                 "pricing_status": l.pricing_status,
+                "notes": l.notes,
             }
             for l in lines
         ],
+    }
+
+
+@lines_router.patch("/{pricing_line_id}")
+def update_pricing_line(
+    pricing_line_id: int,
+    payload: PricingLineEdit,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    line = db.get(PricingLine, pricing_line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Pricing line לא נמצא")
+    data = payload.model_dump(exclude_unset=True)
+    changed: list[str] = []
+    for f in ("unit_cost", "currency", "selected_source", "notes", "pricing_status"):
+        if f in data and getattr(line, f) != data[f]:
+            changed.append(f)
+            setattr(line, f, data[f])
+
+    # Recalculate extended cost.
+    if line.unit_cost is not None and line.required_qty is not None:
+        line.extended_cost = Decimal(str(line.unit_cost)) * Decimal(str(line.required_qty))
+        line.internal_cost = line.unit_cost
+    elif line.unit_cost is None:
+        line.extended_cost = Decimal(0)
+
+    # If a price was added and status wasn't explicitly set, mark priced.
+    if "unit_cost" in data and line.unit_cost is not None and "pricing_status" not in data:
+        if line.pricing_status == "missing_price":
+            line.pricing_status = "priced"
+
+    snap = db.get(PricingSnapshot, line.pricing_snapshot_id)
+    db.flush()
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="pricing_line_updated",
+        project_id=snap.project_id if snap else None,
+        entity_type="pricing_line",
+        entity_name=line.mpn,
+        change_summary=(
+            f"Updated pricing line ({line.mpn or '—'}); "
+            f"changed: {', '.join(changed) if changed else 'recalc'}"
+        ),
+        commit=False,
+    )
+    db.commit()
+    db.refresh(line)
+    # Recompute snapshot totals.
+    all_lines = list(
+        db.scalars(
+            select(PricingLine).where(PricingLine.pricing_snapshot_id == line.pricing_snapshot_id)
+        )
+    )
+    total = sum(float(l.extended_cost or 0) for l in all_lines)
+    return {
+        "line": {
+            "id": line.id,
+            "unit_cost": float(line.unit_cost) if line.unit_cost is not None else None,
+            "extended_cost": float(line.extended_cost) if line.extended_cost is not None else None,
+            "currency": line.currency,
+            "selected_source": line.selected_source,
+            "pricing_status": line.pricing_status,
+            "notes": line.notes,
+        },
+        "total_internal_cost": total,
+        "priced_count": sum(1 for l in all_lines if l.pricing_status == "priced"),
+        "missing_price_count": sum(1 for l in all_lines if l.pricing_status == "missing_price"),
+        "needs_review_count": sum(1 for l in all_lines if l.pricing_status == "needs_review"),
     }
 
 

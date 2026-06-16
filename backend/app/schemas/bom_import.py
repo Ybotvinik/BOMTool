@@ -70,6 +70,12 @@ class BomImportResult(BaseModel):
     missing_qty_count: int = 0
     dnp_count: int = 0
     needs_review_count: int = 0
+    # Import breakdown.
+    total_rows_scanned: int = 0
+    empty_rows_skipped: int = 0
+    invalid_rows_skipped: int = 0
+    rows_needing_review: int = 0
+    skipped_rows_sample: list[str] = []
     # Backwards-compatible aliases.
     line_count: int
     version_label: str

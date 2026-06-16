@@ -9,6 +9,7 @@ from app.routers import (
     bom_versions,
     china_quote,
     customers,
+    metrics,
     pricing,
     projects,
     users,
@@ -41,6 +42,8 @@ def api_health() -> dict[str, str]:
 api = settings.api_v1_prefix
 app.include_router(users.router, prefix=api)
 app.include_router(customers.router, prefix=api)
+# Metrics first so /projects/metrics resolves before /projects/{project_id}.
+app.include_router(metrics.router, prefix=api)
 app.include_router(projects.router, prefix=api)
 app.include_router(bom_versions.router, prefix=api)
 app.include_router(bom_lines.router, prefix=api)
@@ -48,5 +51,6 @@ app.include_router(bom_import.router, prefix=api)
 app.include_router(china_quote.router, prefix=api)
 app.include_router(china_quote.project_router, prefix=api)
 app.include_router(pricing.router, prefix=api)
+app.include_router(pricing.lines_router, prefix=api)
 app.include_router(pricing.project_router, prefix=api)
 app.include_router(activity_log.router, prefix=api)

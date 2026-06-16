@@ -290,16 +290,23 @@ def commit_bom(
 
     line_count = 0
     skipped = 0
+    empty_skipped = 0
     missing_mpn = 0
     missing_qty = 0
     dnp_count = 0
     needs_review = 0
+    skipped_sample: list[str] = []
     for row in data_rows:
         if not any(c.strip() for c in row):
+            empty_skipped += 1
             continue  # fully empty row
         check = validity_fields or [f for f in mapping if mapping.get(f) and mapping[f] in col_index]
         if not any(cell(row, f).strip() for f in check):
             skipped += 1
+            if len(skipped_sample) < 5:
+                skipped_sample.append(
+                    " | ".join(c for c in row if c.strip())[:160]
+                )
             continue  # no meaningful values -> metadata / junk row
         line_count += 1
         mpn = cell(row, "mpn") or None
@@ -401,6 +408,11 @@ def commit_bom(
         missing_qty_count=missing_qty,
         dnp_count=dnp_count,
         needs_review_count=needs_review,
+        total_rows_scanned=len(data_rows),
+        empty_rows_skipped=empty_skipped,
+        invalid_rows_skipped=skipped,
+        rows_needing_review=quality_summary.get("needs_review_count", 0),
+        skipped_rows_sample=skipped_sample,
         line_count=line_count,
         version_label=final_name,
         quality_summary=quality_summary,

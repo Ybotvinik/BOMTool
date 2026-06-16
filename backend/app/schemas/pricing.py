@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -10,6 +11,14 @@ class PricingFromChinaQuote(BaseModel):
     bom_version_id: int
     supplier_quote_id: int
     snapshot_name: str | None = None
+
+
+class PricingLineEdit(BaseModel):
+    unit_cost: Decimal | None = None
+    currency: str | None = None
+    selected_source: str | None = None
+    notes: str | None = None
+    pricing_status: str | None = None
 
 
 class PricingSnapshotResult(BaseModel):

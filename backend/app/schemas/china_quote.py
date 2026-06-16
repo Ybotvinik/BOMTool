@@ -42,6 +42,18 @@ class ChinaQuoteImportResult(BaseModel):
     currency: str
     quote_name: str
     supplier_name: str
+    total_rows_scanned: int = 0
+    lines_skipped: int = 0
+    missing_mpn_count: int = 0
+    missing_price_count: int = 0
+    skipped_rows_sample: list[str] = []
+
+
+class ChinaMatchUpdate(BaseModel):
+    bom_line_id: int | None = None
+    match_status: str | None = None
+    match_confidence: int | None = None
+    match_reason: str | None = None
 
 
 class ChinaQuoteRead(ORMModel):
