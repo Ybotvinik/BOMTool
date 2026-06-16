@@ -127,3 +127,35 @@ export async function apiChinaPreview<T>(opts: {
   if (!res.ok) await parseError(res, path, "POST");
   return res.json() as Promise<T>;
 }
+
+/** POST that returns a binary file (e.g. Excel export). */
+export async function apiDownloadPost(
+  path: string,
+  body: unknown,
+  userId?: number,
+): Promise<{ blob: Blob; fileName: string }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (userId != null) headers["X-User-Id"] = String(userId);
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) await parseError(res, path, "POST");
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename="([^"]+)"/.exec(cd);
+  const fileName = match?.[1] ?? "export.xlsx";
+  const blob = await res.blob();
+  return { blob, fileName };
+}
+
+export function triggerBlobDownload(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

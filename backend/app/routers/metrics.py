@@ -47,6 +47,10 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         "latest_internal_cost_currency": None,
         "missing_price_count": 0,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        "build_quantity": project.build_quantity,
+        "bom_revision_code": None,
+        "bom_doc_number": None,
+        "bom_board_name": None,
     }
 
     # Active BOM version + quality.
@@ -54,6 +58,9 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         version = db.get(BomVersion, project.active_version_id)
         if version is not None:
             out["active_bom_version_name"] = version.version_name or version.version_label
+            out["bom_revision_code"] = version.revision_code
+            out["bom_doc_number"] = version.source_doc_number
+            out["bom_board_name"] = version.board_name
             lines = list(
                 db.scalars(
                     select(BomLine).where(BomLine.bom_version_id == version.id)

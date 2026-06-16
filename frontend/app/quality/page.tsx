@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { RefreshCw, Loader2, Pencil, ExternalLink, ShieldCheck } from "lucide-react";
 import { Card, PageHeader, Kpi, Badge } from "@/components/ui";
 import { apiGet, apiPost } from "@/lib/api";
@@ -19,6 +20,16 @@ function SeverityBadge({ status }: { status: string }) {
 }
 
 export default function QualityPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-slate-500 text-[13px]">טוען...</div>}>
+      <QualityPageInner />
+    </Suspense>
+  );
+}
+
+function QualityPageInner() {
+  const urlProjectId = useSearchParams().get("project_id");
+  const urlVersionId = useSearchParams().get("version_id");
   const { user } = useCurrentUser();
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [projectId, setProjectId] = useState<number | null>(null);
@@ -33,18 +44,30 @@ export default function QualityPage() {
   useEffect(() => {
     apiGet<ApiProject[]>("/api/projects").then((ps) => {
       setProjects(ps);
-      if (ps.length) setProjectId(ps[0].id);
+      if (urlProjectId) {
+        const match = ps.find((p) => String(p.id) === urlProjectId);
+        if (match) setProjectId(match.id);
+      } else if (ps.length) {
+        setProjectId(ps[0].id);
+      }
     });
-  }, []);
+  }, [urlProjectId]);
 
   useEffect(() => {
     if (projectId == null) return;
     apiGet<ApiVersion[]>(`/api/bom-versions?project_id=${projectId}`).then((vs) => {
       setVersions(vs);
+      if (urlVersionId) {
+        const match = vs.find((v) => String(v.id) === urlVersionId);
+        if (match) {
+          setVersionId(match.id);
+          return;
+        }
+      }
       const active = vs.find((v) => v.is_active) ?? vs[vs.length - 1];
       setVersionId(active ? active.id : null);
     });
-  }, [projectId]);
+  }, [projectId, urlVersionId]);
 
   const load = useCallback(async (id: number) => {
     setLoading(true);

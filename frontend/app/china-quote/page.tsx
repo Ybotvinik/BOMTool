@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { UploadCloud, Loader2, Database, DollarSign, RefreshCw, Lock, Table2 } from "lucide-react";
 import { Card, PageHeader, Kpi, Badge } from "@/components/ui";
 import { apiGet, apiPost, apiPatch, apiChinaPreview } from "@/lib/api";
@@ -81,6 +82,15 @@ function MatchBadge({ status }: { status: string }) {
 }
 
 export default function ChinaQuotePage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-slate-500 text-[13px]">טוען...</div>}>
+      <ChinaQuotePageInner />
+    </Suspense>
+  );
+}
+
+function ChinaQuotePageInner() {
+  const urlProjectId = useSearchParams().get("project_id");
   const { user } = useCurrentUser();
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [projectId, setProjectId] = useState<number | null>(null);
@@ -108,9 +118,14 @@ export default function ChinaQuotePage() {
   useEffect(() => {
     apiGet<ApiProject[]>("/api/projects").then((ps) => {
       setProjects(ps);
-      if (ps.length) setProjectId(ps[0].id);
+      if (urlProjectId) {
+        const match = ps.find((p) => String(p.id) === urlProjectId);
+        if (match) setProjectId(match.id);
+      } else if (ps.length) {
+        setProjectId(ps[0].id);
+      }
     });
-  }, []);
+  }, [urlProjectId]);
 
   useEffect(() => {
     if (projectId == null) return;

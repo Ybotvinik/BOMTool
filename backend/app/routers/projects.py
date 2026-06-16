@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user_id
-from app.models import Customer, Project
+from app.models import ActivityLog, Customer, Project
+from app.schemas.activity_log import ActivityLogRead
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
 from app.services.activity import log_activity
 
@@ -49,6 +50,24 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> Project:
     if project is None or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+@router.get("/{project_id}/activity", response_model=list[ActivityLogRead])
+def project_activity(
+    project_id: int,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> list[ActivityLog]:
+    project = db.get(Project, project_id)
+    if project is None or project.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    stmt = (
+        select(ActivityLog)
+        .where(ActivityLog.project_id == project_id)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(min(limit, 200))
+    )
+    return list(db.scalars(stmt))
 
 
 @router.patch("/{project_id}", response_model=ProjectRead)

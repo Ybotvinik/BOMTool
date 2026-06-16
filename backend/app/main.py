@@ -9,6 +9,7 @@ from app.routers import (
     bom_versions,
     china_quote,
     customers,
+    exports,
     metrics,
     pricing,
     projects,
@@ -53,4 +54,5 @@ app.include_router(china_quote.project_router, prefix=api)
 app.include_router(pricing.router, prefix=api)
 app.include_router(pricing.lines_router, prefix=api)
 app.include_router(pricing.project_router, prefix=api)
+app.include_router(exports.router, prefix=api)
 app.include_router(activity_log.router, prefix=api)
