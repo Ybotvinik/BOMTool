@@ -10,15 +10,18 @@ from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font
+from openpyxl.formula.translate import Translator
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BomLine, BomVersion, Customer, PricingLine, PricingSnapshot, Project
 
-# Customer pricing layer is not implemented yet. Internal costs must not be exposed
-# in customer exports. Uses bom_lines.customer_price only when set.
+# Official/market prices in this export are reference prices only — not final customer
+# quote prices. Customer Quote Price is a future commercial pricing layer.
+# Internal/China costs must never be exposed in customer exports.
+# Official Unit Price is populated only when notes contain an explicit official source.
 
 CUSTOMER_TEMPLATE_PATH = (
     Path(__file__).resolve().parent.parent / "templates" / "customer_bom_cost_review_template.xlsx"
@@ -37,10 +40,25 @@ _COL_QTY = 5
 _COL_REQ_QTY = 6
 _COL_REFDES = 7
 _COL_FOOTPRINT = 8
-_COL_PRICE_SOURCE = 9
-_COL_UNIT_PRICE = 10
-_COL_EXTENDED = 11
+_COL_OFFICIAL_SOURCE = 9
+_COL_OFFICIAL_UNIT = 10
+_COL_OFFICIAL_EXTENDED = 11
 _COL_NOTES = 12
+
+# Backward-compatible aliases used by column index logic.
+_COL_PRICE_SOURCE = _COL_OFFICIAL_SOURCE
+_COL_UNIT_PRICE = _COL_OFFICIAL_UNIT
+_COL_EXTENDED = _COL_OFFICIAL_EXTENDED
+
+USD_CURRENCY_FMT = '"$"#,##0.00'
+USD_UNIT_FMT = '"$"#,##0.0000'
+QTY_INT_FMT = "#,##0"
+
+_METADATA_BUILD_QTY = "G9"
+
+_DNP_FILL = PatternFill(fill_type="solid", fgColor="D9D9D9")
+_DNP_FONT_COLOR = "808080"
+_DNP_NOTE = "DNP / Not populated"
 
 _FORBIDDEN_CUSTOMER_HEADER_PHRASES = (
     "china",
@@ -55,6 +73,36 @@ _FORBIDDEN_CUSTOMER_HEADER_PHRASES = (
     "unit cost",
     "extended cost",
     "gross margin",
+    "customer unit price",
+    "customer extended price",
+    "customer price source",
+    "customer price list",
+    "official price list",
+    "generic price list",
+)
+
+# (needle, canonical label) — longest needles first for matching in BOM line notes.
+_OFFICIAL_SOURCE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("future electronics", "Future"),
+    ("manual official", "Manual Official"),
+    ("official rep", "Official Rep"),
+    ("digi-key", "Digi-Key"),
+    ("digikey", "Digi-Key"),
+    ("mouser", "Mouser"),
+    ("arrow", "Arrow"),
+    ("avnet", "Avnet"),
+    ("future", "Future"),
+    ("tti", "TTI"),
+)
+
+_FORBIDDEN_OFFICIAL_SOURCE_VALUES = frozenset(
+    {
+        "official price list",
+        "customer price list",
+        "generic price list",
+        "price list",
+        "official/market price list",
+    }
 )
 
 
@@ -119,6 +167,34 @@ def _apply_row_styles(ws, row: int, style_sources: list) -> None:
         _copy_cell_style(src, ws.cell(row=row, column=col_idx))
 
 
+def _apply_dnp_row_styles(ws, row: int, style_sources: list) -> None:
+    """Gray out entire DNP data row while preserving borders/alignment."""
+    for col_idx, src in enumerate(style_sources, start=1):
+        cell = ws.cell(row=row, column=col_idx)
+        _copy_cell_style(src, cell)
+        cell.fill = _DNP_FILL
+        if cell.font:
+            cell.font = Font(
+                name=cell.font.name,
+                size=cell.font.size,
+                bold=cell.font.bold,
+                italic=cell.font.italic,
+                underline=cell.font.underline,
+                strikethrough=cell.font.strikethrough,
+                color=_DNP_FONT_COLOR,
+            )
+        else:
+            cell.font = Font(color=_DNP_FONT_COLOR)
+
+
+def _is_dnp_line(line: BomLine) -> bool:
+    if line.dnp:
+        return True
+    if line.required_qty is not None and float(line.required_qty) == 0:
+        return True
+    return False
+
+
 def _load_customer_template_sheet():
     if not CUSTOMER_TEMPLATE_PATH.is_file():
         raise FileNotFoundError(
@@ -156,22 +232,44 @@ def _fill_customer_template_metadata(
     ws["B6"] = board_name
     ws["D6"] = build_qty if build_qty > 0 else ""
     ws["G6"] = export_date
-    ws["G9"] = build_qty if build_qty > 0 else ""
-    # B10/E10/B11/E11 — manual PCB / shipping / assembly / other cost placeholders.
+    ws[_METADATA_BUILD_QTY] = build_qty if build_qty > 0 else ""
+    if build_qty > 0:
+        ws[_METADATA_BUILD_QTY].number_format = QTY_INT_FMT
 
 
-def _update_components_total_formula(ws, data_end_row: int) -> None:
-    ext_col = get_column_letter(_COL_EXTENDED)
-    start = TEMPLATE_DATA_START_ROW
-    ws["D9"] = (
-        f'=IF(SUM({ext_col}{start}:{ext_col}{data_end_row})=0,"Pending",'
-        f"SUM({ext_col}{start}:{ext_col}{data_end_row}))"
-    )
+def _cell_has_formula(cell) -> bool:
+    value = cell.value
+    return isinstance(value, str) and value.startswith("=")
 
 
-def _clear_template_data_rows(ws, start: int, end: int) -> None:
+def _snapshot_template_extended_formula(ws) -> str | None:
+    """Capture the row-level extended price formula from the template."""
+    value = ws.cell(
+        row=TEMPLATE_DATA_START_ROW, column=_COL_OFFICIAL_EXTENDED
+    ).value
+    if isinstance(value, str) and value.startswith("="):
+        return value
+    return None
+
+
+def _apply_template_extended_formula(ws, row: int, template_formula: str) -> None:
+    """Copy the template extended-price formula to another data row."""
+    ext_col = get_column_letter(_COL_OFFICIAL_EXTENDED)
+    origin = f"{ext_col}{TEMPLATE_DATA_START_ROW}"
+    dest = f"{ext_col}{row}"
+    ws.cell(row=row, column=_COL_OFFICIAL_EXTENDED).value = Translator(
+        template_formula, origin=origin
+    ).translate_formula(dest)
+
+
+def _clear_bom_row_values(ws, start: int, end: int) -> None:
+    """Clear prior BOM sample values; preserve existing extended-price formulas."""
     for row in range(start, end + 1):
         for col in range(1, TEMPLATE_TABLE_COLS + 1):
+            if col == _COL_OFFICIAL_EXTENDED and _cell_has_formula(
+                ws.cell(row=row, column=col)
+            ):
+                continue
             ws.cell(row=row, column=col).value = None
 
 
@@ -187,18 +285,57 @@ def internal_pricing_snapshot_filename(project_code: str, snapshot_name: str) ->
     return f"Internal_Pricing_{_safe_part(project_code)}_{_safe_part(snapshot_name)}.xlsx"
 
 
-def _customer_unit_price(line: BomLine) -> float | None:
-    """Customer-facing unit price from BOM line only — never internal cost."""
-    if line.customer_price is None:
+def _is_forbidden_official_source(value: str | None) -> bool:
+    if not value:
+        return False
+    lower = value.strip().lower()
+    if lower in {"tbd", "dnp"}:
+        return False
+    if lower in _FORBIDDEN_OFFICIAL_SOURCE_VALUES:
+        return True
+    return any(phrase in lower for phrase in _FORBIDDEN_CUSTOMER_HEADER_PHRASES)
+
+
+def _extract_explicit_official_source(line: BomLine) -> str | None:
+    """Return canonical official source name only when explicitly present in notes."""
+    text = (line.notes or "").strip()
+    if not text:
         return None
-    return float(line.customer_price)
+    lower = text.lower()
+    for needle, label in _OFFICIAL_SOURCE_PATTERNS:
+        if needle in lower:
+            return label
+    # Exact match on notes when user entered a canonical source name directly.
+    for _needle, label in _OFFICIAL_SOURCE_PATTERNS:
+        if lower == label.lower():
+            return label
+    return None
 
 
-def _customer_price_source(_line: BomLine, unit_price: float | None) -> str:
-    """Customer-safe price source only — no internal/China sourcing."""
-    if unit_price is None:
-        return "TBD"
-    return "Customer Price List"
+def _resolve_official_row(line: BomLine) -> tuple[str, float | None]:
+    """Resolve official source + unit price. No generic fallbacks; no price without source."""
+    explicit = _extract_explicit_official_source(line)
+    if explicit is None or _is_forbidden_official_source(explicit):
+        return "TBD", None
+    if line.customer_price is not None:
+        return explicit, float(line.customer_price)
+    return explicit, None
+
+
+def _validate_official_source_values(values: list[str]) -> None:
+    for value in values:
+        if _is_forbidden_official_source(value):
+            raise ValueError(
+                f"Unsafe official source value '{value}' in customer export output"
+            )
+
+
+def _apply_data_row_number_formats(ws, row: int, *, is_dnp: bool) -> None:
+    ws.cell(row=row, column=_COL_QTY).number_format = QTY_INT_FMT
+    ws.cell(row=row, column=_COL_REQ_QTY).number_format = QTY_INT_FMT
+    if not is_dnp:
+        ws.cell(row=row, column=_COL_OFFICIAL_UNIT).number_format = USD_UNIT_FMT
+    ws.cell(row=row, column=_COL_OFFICIAL_EXTENDED).number_format = USD_CURRENCY_FMT
 
 
 def build_customer_bom_review_xlsx(
@@ -208,8 +345,7 @@ def build_customer_bom_review_xlsx(
     version: BomVersion,
     lines: list[BomLine],
 ) -> tuple[bytes, str]:
-    # Customer pricing layer is not implemented yet. Internal costs must not be exposed
-    # in customer exports.
+    # Official/market reference export only — not final customer quote pricing.
 
     customer = db.get(Customer, project.customer_id)
     version_label = version.version_name or version.version_label
@@ -218,6 +354,7 @@ def build_customer_bom_review_xlsx(
     build_qty = version.build_quantity or project.build_quantity or 0
 
     wb, ws = _load_customer_template_sheet()
+    template_extended_formula = _snapshot_template_extended_formula(ws)
 
     template_headers = [
         ws.cell(row=TEMPLATE_TABLE_HEADER_ROW, column=c).value
@@ -248,18 +385,30 @@ def build_customer_bom_review_xlsx(
         ws.insert_rows(TEMPLATE_DATA_DEFAULT_END_ROW + 1, extra)
         data_end_row = last_data_row
         for offset in range(extra):
-            _apply_row_styles(ws, TEMPLATE_DATA_DEFAULT_END_ROW + 1 + offset, style_sources)
+            new_row = TEMPLATE_DATA_DEFAULT_END_ROW + 1 + offset
+            _apply_row_styles(ws, new_row, style_sources)
+            if template_extended_formula:
+                _apply_template_extended_formula(ws, new_row, template_extended_formula)
 
-    _clear_template_data_rows(ws, TEMPLATE_DATA_START_ROW, data_end_row)
-    _update_components_total_formula(ws, data_end_row)
+    _clear_bom_row_values(ws, TEMPLATE_DATA_START_ROW, data_end_row)
 
-    unit_col = get_column_letter(_COL_UNIT_PRICE)
-    req_col = get_column_letter(_COL_REQ_QTY)
+    written_sources: list[str] = []
 
     for row_offset, ln in enumerate(lines):
         row = TEMPLATE_DATA_START_ROW + row_offset
-        unit_price = _customer_unit_price(ln)
-        _apply_row_styles(ws, row, style_sources)
+        is_dnp = _is_dnp_line(ln)
+
+        if is_dnp:
+            _apply_dnp_row_styles(ws, row, style_sources)
+            official_source = "DNP"
+            unit_price = None
+            notes = _DNP_NOTE
+        else:
+            _apply_row_styles(ws, row, style_sources)
+            official_source, unit_price = _resolve_official_row(ln)
+            notes = ln.notes
+
+        written_sources.append(official_source)
 
         ws.cell(row=row, column=_COL_LINE, value=ln.line_no)
         ws.cell(row=row, column=_COL_MPN, value=ln.mpn)
@@ -269,12 +418,19 @@ def build_customer_bom_review_xlsx(
         ws.cell(row=row, column=_COL_REQ_QTY, value=_num(ln.required_qty))
         ws.cell(row=row, column=_COL_REFDES, value=ln.reference_designators)
         ws.cell(row=row, column=_COL_FOOTPRINT, value=ln.footprint)
-        ws.cell(row=row, column=_COL_PRICE_SOURCE, value=_customer_price_source(ln, unit_price))
-        ws.cell(row=row, column=_COL_UNIT_PRICE, value=unit_price)
-        ws.cell(row=row, column=_COL_NOTES, value=None)
-        ws.cell(row=row, column=_COL_EXTENDED).value = (
-            f'=IF({unit_col}{row}="","",{req_col}{row}*{unit_col}{row})'
-        )
+        ws.cell(row=row, column=_COL_OFFICIAL_SOURCE, value=official_source)
+        ws.cell(row=row, column=_COL_OFFICIAL_UNIT, value=None if is_dnp else unit_price)
+        ws.cell(row=row, column=_COL_NOTES, value=notes)
+
+        ext_cell = ws.cell(row=row, column=_COL_OFFICIAL_EXTENDED)
+        if is_dnp:
+            ext_cell.value = 0
+        elif not _cell_has_formula(ext_cell) and template_extended_formula:
+            _apply_template_extended_formula(ws, row, template_extended_formula)
+
+        _apply_data_row_number_formats(ws, row, is_dnp=is_dnp)
+
+    _validate_official_source_values(written_sources)
 
     last_col = get_column_letter(TEMPLATE_TABLE_COLS)
     ws.auto_filter.ref = (
