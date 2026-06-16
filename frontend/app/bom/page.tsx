@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { RefreshCw, Upload, Loader2, AlertTriangle, Inbox, Pencil, Check, Search } from "lucide-react";
 import { Card, PageHeader, Kpi, Badge } from "@/components/ui";
 import { API_URL, apiGet, apiPost } from "@/lib/api";
@@ -27,7 +27,7 @@ type ApiProject = { id: number; name: string; code: string; customer_id: number;
 type ApiCustomer = { id: number; name: string };
 type ApiLine = Record<string, unknown>;
 type Summary = Record<string, number>;
-type Status = "idle" | "loading" | "ok" | "empty" | "error" | "no-version";
+type Status = "idle" | "loading" | "ok" | "empty" | "error" | "pick-project" | "no-bom";
 
 const s = (v: unknown) => (v == null ? "" : String(v));
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v));
@@ -72,10 +72,13 @@ const FILTERS = [
 ] as const;
 
 function BomInner() {
+  const router = useRouter();
   const params = useSearchParams();
+  const urlProjectId = params.get("project_id");
   const urlVersionId = params.get("version_id");
   const { user } = useCurrentUser();
 
+  const [pickerProjects, setPickerProjects] = useState<ApiProject[]>([]);
   const [versions, setVersions] = useState<ApiVersion[]>([]);
   const [versionId, setVersionId] = useState<number | null>(urlVersionId ? Number(urlVersionId) : null);
   const [version, setVersion] = useState<ApiVersion | null>(null);
@@ -125,6 +128,7 @@ function BomInner() {
 
   useEffect(() => {
     (async () => {
+      setStatus("loading");
       let vs: ApiVersion[] = [];
       try {
         vs = await apiGet<ApiVersion[]>("/api/bom-versions");
@@ -132,24 +136,57 @@ function BomInner() {
       } catch {
         /* ignore */
       }
-      let id: number | null = urlVersionId ? Number(urlVersionId) : null;
-      if (id == null) {
+
+      if (!urlProjectId && !urlVersionId) {
         try {
-          const projects = await apiGet<ApiProject[]>("/api/projects");
-          id = projects[0]?.active_version_id ?? null;
+          const [ps, cs] = await Promise.all([
+            apiGet<ApiProject[]>("/api/projects"),
+            apiGet<ApiCustomer[]>("/api/customers"),
+          ]);
+          setPickerProjects(ps);
+          setCustomers(cs);
         } catch {
           /* ignore */
         }
-      }
-      if (id == null) {
-        setStatus("no-version");
+        setStatus("pick-project");
         return;
       }
+
+      let id: number | null = urlVersionId ? Number(urlVersionId) : null;
+
+      if (id == null && urlProjectId) {
+        const pid = Number(urlProjectId);
+        if (!Number.isFinite(pid)) {
+          setStatus("pick-project");
+          return;
+        }
+        try {
+          const p = await apiGet<ApiProject>(`/api/projects/${pid}`);
+          setProject(p);
+          const cs = await apiGet<ApiCustomer[]>("/api/customers");
+          setCustomers(cs);
+          if (p.active_version_id == null) {
+            setStatus("no-bom");
+            return;
+          }
+          id = p.active_version_id;
+        } catch (e) {
+          setStatus("error");
+          setErrorMsg(String(e));
+          return;
+        }
+      }
+
+      if (id == null) {
+        setStatus("pick-project");
+        return;
+      }
+
       setVersionId(id);
       loadMeta(id);
       loadLines(id);
     })();
-  }, [urlVersionId, loadLines, loadMeta]);
+  }, [urlProjectId, urlVersionId, loadLines, loadMeta]);
 
   function selectVersion(id: number) {
     setVersionId(id);
@@ -168,6 +205,14 @@ function BomInner() {
   }
 
   const customerName = project ? customers.find((c) => c.id === project.customer_id)?.name : null;
+  const scopedProjectId =
+    project?.id ??
+    (urlProjectId && Number.isFinite(Number(urlProjectId)) ? Number(urlProjectId) : null) ??
+    version?.project_id ??
+    null;
+  const projectVersions = scopedProjectId
+    ? versions.filter((v) => v.project_id === scopedProjectId)
+    : versions;
 
   const rows = lines.map(toQuality);
   const q = query.trim().toLowerCase();
@@ -194,14 +239,14 @@ function BomInner() {
         subtitle="נתוני BOM אמיתיים + ניתוח איכות"
         actions={
           <>
-            {versions.length > 0 && (
+            {projectVersions.length > 0 && (
               <select
                 value={versionId ?? ""}
                 onChange={(e) => selectVersion(Number(e.target.value))}
                 className="h-8 rounded-md border border-slate-200 px-2 text-[12px] bg-white"
               >
                 <option value="" disabled>בחר גרסה</option>
-                {versions.map((v) => (
+                {projectVersions.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.version_name ?? v.version_label} (#{v.id}){v.is_active ? " ★" : ""}
                   </option>
@@ -217,31 +262,65 @@ function BomInner() {
             <Link href="/quality" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50">
               איכות BOM
             </Link>
-            <Link href="/upload-bom" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-brand text-brand-fg text-[12px] font-medium hover:bg-brand/90">
+            <Link
+              href={project ? `/upload-bom?project_id=${project.id}` : "/upload-bom"}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-brand text-brand-fg text-[12px] font-medium hover:bg-brand/90"
+            >
               <Upload className="h-3.5 w-3.5" /> טעינת BOM
             </Link>
           </>
         }
       />
 
-      {/* Version header */}
-      {version && (
+      {/* Project / version identity */}
+      {(project || version) && (
         <Card className="p-3 mb-3">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-1.5 text-[11.5px]">
-            <Meta label="פרויקט" value={project?.name} />
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-1.5 text-[11.5px]">
             <Meta label="לקוח" value={customerName} />
+            <Meta label="פרויקט" value={project?.name} />
             <Meta label="קוד פרויקט" value={project?.code} />
-            <Meta label="BOM Version" value={version.version_name ?? version.version_label} />
-            <Meta label="Revision" value={version.revision_code} />
-            <Meta label="Doc Number" value={version.source_doc_number} />
-            <Meta label="Board Name" value={version.board_name} />
-            <Meta label="Source File" value={version.source_file_name} />
-            <Meta label="Build Quantity" value={version.build_quantity?.toString()} />
+            <Meta label="BOM Version" value={version ? (version.version_name ?? version.version_label) : null} />
+            {process.env.NODE_ENV === "development" && version && (
+              <Meta label="Version ID" value={String(version.id)} />
+            )}
+            {version && (
+              <>
+                <Meta label="Revision" value={version.revision_code} />
+                <Meta label="Doc Number" value={version.source_doc_number} />
+                <Meta label="Board Name" value={version.board_name} />
+                <Meta label="Source File" value={version.source_file_name} />
+                <Meta label="Build Quantity" value={version.build_quantity?.toString()} />
+              </>
+            )}
           </div>
         </Card>
       )}
 
-      {/* Quality cards */}
+      {status === "pick-project" && (
+        <Card className="p-6 max-w-md mb-3">
+          <label className="block text-[12px] text-slate-600 mb-1">פרויקט</label>
+          <select
+            value=""
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) router.push(`/bom?project_id=${v}`);
+            }}
+            className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
+          >
+            <option value="">בחר פרויקט</option>
+            {pickerProjects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.code})
+              </option>
+            ))}
+          </select>
+        </Card>
+      )}
+
+      {/* Version header — legacy block removed; identity shown above */}
+
+      {/* Quality cards — only when a version is loaded */}
+      {(status === "ok" || status === "empty") && (
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
         <Kpi label="Total Lines" value={summary?.total_lines ?? rows.length} />
         <Kpi label="Quality Score" value={summary?.quality_score ?? "—"} tone={(summary?.quality_score ?? 100) >= 90 ? "good" : (summary?.quality_score ?? 0) >= 70 ? "warn" : "bad"} />
@@ -250,8 +329,10 @@ function BomInner() {
         <Kpi label="Needs Review" value={summary?.needs_review_count ?? 0} tone="warn" />
         <Kpi label="DNP" value={summary?.dnp_count ?? 0} />
       </div>
+      )}
 
       {/* Filters + search */}
+      {(status === "ok" || status === "empty") && (
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {FILTERS.map(([key, label]) => (
           <button
@@ -275,15 +356,20 @@ function BomInner() {
           />
         </div>
       </div>
+      )}
 
       <Card className="overflow-hidden">
         {status === "loading" ? (
           <div className="py-12 flex items-center justify-center gap-2 text-slate-500 text-[13px]">
             <Loader2 className="h-4 w-4 animate-spin" /> טוען שורות BOM...
           </div>
-        ) : status === "no-version" ? (
+        ) : status === "pick-project" ? (
           <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
-            <Inbox className="h-7 w-7" /> לא נבחרה גרסת BOM. ייבא קובץ BOM או בחר גרסה.
+            <Inbox className="h-7 w-7" /> בחר פרויקט
+          </div>
+        ) : status === "no-bom" ? (
+          <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
+            <Inbox className="h-7 w-7" /> לא נטען BOM לפרויקט זה עדיין
           </div>
         ) : status === "error" ? (
           <div className="py-12 flex flex-col items-center justify-center gap-2 text-red-600 text-[13px]">

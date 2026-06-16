@@ -71,6 +71,11 @@ async def preview_bom(
     header row / sheet without re-uploading). ``header_row_index`` (zero-based)
     overrides auto-detection; ``sheet_name`` selects a worksheet.
     """
+    if project_id is None:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    if db.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     storage = get_file_storage()
 
     if file is not None:
@@ -194,6 +199,8 @@ def commit_bom(
     Rows above ``header_row_index`` (metadata), fully empty rows, and rows with
     no mapped field values are skipped.
     """
+    if payload.project_id is None:
+        raise HTTPException(status_code=400, detail="project_id is required")
     project = db.get(Project, payload.project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")

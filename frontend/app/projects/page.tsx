@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Upload, FolderOpen, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Plus, Upload, FolderOpen, RefreshCw, Pencil, Trash2, GitBranch } from "lucide-react";
 import { Card, PageHeader, Kpi, StatusBadge, Badge } from "@/components/ui";
 
 function QualityScore({ score }: { score: number | null }) {
@@ -39,6 +39,7 @@ type ApiVersion = { id: number; version_label: string; version_name: string | nu
 type Metrics = {
   project_id: number;
   active_bom_version_name: string | null;
+  active_bom_version_id: number | null;
   bom_quality_score: number | null;
   bom_needs_review_count: number;
   latest_internal_cost: number | null;
@@ -46,6 +47,11 @@ type Metrics = {
   latest_pricing_snapshot_id: number | null;
   missing_price_count: number;
 };
+
+function bomTableHref(projectId: number, activeVersionId: number | null) {
+  const base = `/bom?project_id=${projectId}`;
+  return activeVersionId != null ? `${base}&version_id=${activeVersionId}` : base;
+}
 
 export default function ProjectsPage() {
   const { user } = useCurrentUser();
@@ -272,17 +278,33 @@ export default function ProjectsPage() {
           </thead>
           <tbody>
             {live
-              ? apiRows.map((p) => (
+              ? apiRows.map((p) => {
+                  const activeVersionId =
+                    p.active_version_id ?? metrics[p.id]?.active_bom_version_id ?? null;
+                  const activeBom =
+                    metrics[p.id]?.active_bom_version_name ??
+                    (activeVersionId != null ? versionName(activeVersionId) : null);
+                  const showActiveBom = activeBom && activeBom !== "—";
+                  return (
                   <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/60">
                     <td className="px-3 py-2 font-medium">{customerName(p.customer_id)}</td>
                     <td className="px-3 py-2">
-                      <Link href="/project" className="text-brand hover:underline font-medium">
+                      <Link href={`/project?project_id=${p.id}`} className="text-brand hover:underline font-medium">
                         {p.name}
                       </Link>
                     </td>
                     <td className="px-3 py-2 text-slate-500 tabular-nums">{p.code}</td>
                     <td className="px-3 py-2 tabular-nums">
-                      {metrics[p.id]?.active_bom_version_name ?? versionName(p.active_version_id)}
+                      {showActiveBom ? (
+                        <Link
+                          href={bomTableHref(p.id, activeVersionId)}
+                          className="text-brand hover:underline"
+                        >
+                          {activeBom}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-2 text-center"><QualityScore score={metrics[p.id]?.bom_quality_score ?? null} /></td>
                     <td className="px-3 py-2 text-center tabular-nums">
@@ -314,6 +336,20 @@ export default function ProjectsPage() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center justify-center gap-1">
+                        <Link
+                          href={bomTableHref(p.id, activeVersionId)}
+                          title="טבלת BOM"
+                          className="h-7 w-7 rounded-md hover:bg-brand-soft flex items-center justify-center text-slate-500 hover:text-brand"
+                        >
+                          <GitBranch className="h-3.5 w-3.5" />
+                        </Link>
+                        <Link
+                          href={`/upload-bom?project_id=${p.id}`}
+                          title="טעינת BOM"
+                          className="h-7 w-7 rounded-md hover:bg-brand-soft flex items-center justify-center text-slate-500 hover:text-brand"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                        </Link>
                         <button
                           onClick={() => openEdit(p)}
                           title="עריכה"
@@ -334,7 +370,8 @@ export default function ProjectsPage() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               : mockRows.map((p) => (
                   <tr key={p.id} className="border-t border-slate-100">
                     <td className="px-3 py-2 font-medium">{p.customer}</td>

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -18,7 +19,8 @@ import { Card, PageHeader, Badge } from "@/components/ui";
 import { apiGet, apiBomPreview, apiPost } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
 
-type ApiProject = { id: number; name: string; code: string };
+type ApiProject = { id: number; name: string; code: string; customer_id: number };
+type ApiCustomer = { id: number; name: string };
 
 type CandidateRow = {
   row_index: number;
@@ -109,10 +111,12 @@ function StepBadge({ n, label, active, done }: { n: number; label: string; activ
   );
 }
 
-export default function UploadBomPage() {
+function UploadBomInner() {
+  const urlProjectId = useSearchParams().get("project_id");
   const { user } = useCurrentUser();
   const [projects, setProjects] = useState<ApiProject[]>([]);
-  const [projectId, setProjectId] = useState<number | null>(null);
+  const [customers, setCustomers] = useState<ApiCustomer[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [versionLabel, setVersionLabel] = useState("");
   const [setActive, setSetActive] = useState(true);
 
@@ -126,13 +130,35 @@ export default function UploadBomPage() {
   const [versionEdited, setVersionEdited] = useState(false);
 
   useEffect(() => {
-    apiGet<ApiProject[]>("/api/projects")
-      .then((p) => {
+    Promise.all([
+      apiGet<ApiProject[]>("/api/projects"),
+      apiGet<ApiCustomer[]>("/api/customers"),
+    ])
+      .then(([p, cs]) => {
         setProjects(p);
-        if (p.length) setProjectId(p[0].id);
+        setCustomers(cs);
+        if (urlProjectId) {
+          const match = p.find((x) => String(x.id) === String(urlProjectId));
+          if (match) {
+            setSelectedProjectId(String(match.id));
+            setError(null);
+          } else {
+            setSelectedProjectId("");
+            setError("הפרויקט שנבחר לא נמצא");
+          }
+        } else {
+          setSelectedProjectId("");
+        }
       })
       .catch(() => setError("לא ניתן לטעון פרויקטים — ודא שה-API פעיל."));
-  }, []);
+  }, [urlProjectId]);
+
+  const selectedProject = projects.find((p) => String(p.id) === String(selectedProjectId));
+  const canUpload = Boolean(selectedProjectId) && Boolean(selectedProject);
+  const selectedCustomerName =
+    selectedProject != null
+      ? customers.find((c) => c.id === selectedProject.customer_id)?.name ?? "—"
+      : null;
 
   function applyPreview(pv: Preview) {
     setPreview(pv);
@@ -145,6 +171,11 @@ export default function UploadBomPage() {
 
   async function onFile(file: File | undefined) {
     if (!file) return;
+    if (!canUpload) {
+      setError("יש לבחור פרויקט לפני העלאת קובץ BOM");
+      return;
+    }
+    const pid = Number(selectedProjectId);
     setError(null);
     setResult(null);
     setBusy(true);
@@ -152,7 +183,7 @@ export default function UploadBomPage() {
     try {
       const pv = await apiBomPreview<Preview>({
         file,
-        projectId: projectId ?? undefined,
+        projectId: pid,
         userId: user.id,
       });
       applyPreview(pv);
@@ -166,7 +197,8 @@ export default function UploadBomPage() {
 
   // Re-preview an already-uploaded file with a different header row / sheet.
   async function rePreview(opts: { headerRowIndex?: number; sheetName?: string }) {
-    if (!preview) return;
+    if (!preview || !canUpload) return;
+    const pid = Number(selectedProjectId);
     setBusy(true);
     setError(null);
     try {
@@ -174,7 +206,7 @@ export default function UploadBomPage() {
         filePath: preview.file_path,
         headerRowIndex: opts.headerRowIndex,
         sheetName: opts.sheetName ?? preview.sheet_name,
-        projectId: projectId ?? undefined,
+        projectId: pid,
         userId: user.id,
       });
       applyPreview(pv);
@@ -186,7 +218,8 @@ export default function UploadBomPage() {
   }
 
   async function doImport() {
-    if (!preview || !projectId) return;
+    if (!preview || !canUpload) return;
+    const pid = Number(selectedProjectId);
     if (preview.header_row_index == null) {
       setError("יש לבחור שורת כותרות לפני הייבוא.");
       return;
@@ -197,7 +230,7 @@ export default function UploadBomPage() {
       const res = await apiPost<ImportResult>(
         "/api/bom-import/commit",
         {
-          project_id: projectId,
+          project_id: pid,
           version_name: versionLabel || preview.suggested_version_name,
           revision_code: preview.suggested_revision_code,
           extracted_metadata: preview.extracted_metadata,
@@ -242,6 +275,13 @@ export default function UploadBomPage() {
           <StepBadge n={4} label="ייבוא ל-DB" active={!!result} done={!!result} />
         </div>
       </Card>
+
+      {process.env.NODE_ENV === "development" && (
+        <Card className="p-2 mb-3 text-[10px] font-mono text-slate-600 bg-slate-50 border-slate-200">
+          urlProjectId: {urlProjectId ?? "—"} · selectedProjectId: {selectedProjectId || "—"} ·
+          selectedProject: {selectedProject?.name ?? "—"} · canUpload: {String(canUpload)}
+        </Card>
+      )}
 
       {error && (
         <div className="mb-3 rounded-md border border-red-200 bg-red-50 text-red-700 text-[12.5px] px-3 py-2">
@@ -327,17 +367,40 @@ export default function UploadBomPage() {
             <div>
               <label className="block text-[12px] text-slate-600 mb-1">פרויקט</label>
               <select
-                value={projectId ?? ""}
-                onChange={(e) => setProjectId(Number(e.target.value))}
+                value={selectedProjectId || ""}
+                onChange={(e) => {
+                  setSelectedProjectId(e.target.value);
+                  if (e.target.value) setError(null);
+                }}
                 className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
               >
+                <option value="">בחר פרויקט</option>
                 {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
+                  <option key={p.id} value={String(p.id)}>
                     {p.name} ({p.code})
                   </option>
                 ))}
               </select>
             </div>
+            {canUpload && selectedProject && (
+              <div className="rounded-md border border-brand/20 bg-brand-soft/40 p-3 text-[12px]">
+                <div className="font-semibold text-navy mb-2">טעינת ה-BOM תתבצע לפרויקט:</div>
+                <div className="space-y-1 text-[11.5px]">
+                  <div>
+                    <span className="text-slate-500">לקוח: </span>
+                    <span className="font-medium">{selectedCustomerName}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">שם פרויקט: </span>
+                    <span className="font-medium">{selectedProject.name}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">קוד פרויקט: </span>
+                    <span className="font-medium">{selectedProject.code}</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-[12px] text-slate-600 mb-1">שם גרסת BOM</label>
               <input
@@ -360,7 +423,14 @@ export default function UploadBomPage() {
               קבע כגרסה פעילה
             </label>
 
-            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-8 cursor-pointer hover:border-brand/50 hover:bg-brand-soft/40 transition-colors">
+            <label
+              className={
+                "flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-lg py-8 transition-colors " +
+                (canUpload
+                  ? "cursor-pointer hover:border-brand/50 hover:bg-brand-soft/40"
+                  : "cursor-not-allowed opacity-60")
+              }
+            >
               {busy && !preview ? (
                 <Loader2 className="h-8 w-8 text-brand animate-spin" />
               ) : (
@@ -370,10 +440,16 @@ export default function UploadBomPage() {
                 {preview ? "החלף קובץ" : "בחר קובץ BOM"}
               </div>
               <div className="text-[10.5px] text-slate-400">.xlsx, .xls, .csv</div>
+              {!canUpload && (
+                <div className="text-[10.5px] text-slate-500 text-center px-2">
+                  יש לבחור פרויקט לפני העלאת קובץ BOM
+                </div>
+              )}
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 className="hidden"
+                disabled={!canUpload}
                 onChange={(e) => onFile(e.target.files?.[0])}
               />
             </label>
@@ -596,7 +672,7 @@ export default function UploadBomPage() {
 
                     <button
                       onClick={doImport}
-                      disabled={busy || !projectId}
+                      disabled={busy || !canUpload}
                       className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
                     >
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
@@ -610,5 +686,13 @@ export default function UploadBomPage() {
         </div>
       )}
     </>
+  );
+}
+
+export default function UploadBomPage() {
+  return (
+    <Suspense fallback={<div className="py-12 text-center text-slate-500 text-[13px]">טוען...</div>}>
+      <UploadBomInner />
+    </Suspense>
   );
 }
