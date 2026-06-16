@@ -5,9 +5,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# System deps for psycopg2 runtime.
+# System deps for psycopg2 runtime and bash for entrypoint.sh (pipefail).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 \
+    && apt-get install -y --no-install-recommends bash libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

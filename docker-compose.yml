@@ -19,6 +19,7 @@ services:
   backend:
     build: ./backend
     container_name: glintech_backend
+    command: ["bash", "-c", "sed 's/\\r$//' entrypoint.sh | bash -s"]
     depends_on:
       db:
         condition: service_healthy
