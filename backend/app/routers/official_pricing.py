@@ -11,6 +11,9 @@ from app.database import get_db
 from app.deps import get_current_user_id
 from app.models import OfficialPriceLine, OfficialPriceSnapshot
 from app.schemas.official_pricing import (
+    FetchLineRequest,
+    ManualSourceRequest,
+    MpnOverrideRequest,
     OfficialPriceLineRead,
     OfficialPriceSnapshotRead,
     OfficialPricingFetchRequest,
@@ -19,10 +22,16 @@ from app.schemas.official_pricing import (
     OfficialPricingResultsResponse,
     OfficialSnapshotCreateRequest,
     OfficialSnapshotCreateResponse,
+    SelectOfferRequest,
     SupplierConfigStatus,
+    SupplierOffer,
     SupplierResultCell,
     SupplierTestRequest,
     SupplierTestResponse,
+    WorkbenchExportRequest,
+    WorkbenchLineResult,
+    WorkbenchResultsResponse,
+    WorkbenchSummary,
 )
 from app.services.suppliers.base import SupplierApiError
 from app.services.suppliers.official_pricing import (
@@ -31,6 +40,14 @@ from app.services.suppliers.official_pricing import (
     get_official_results,
     supplier_config_status,
     test_supplier_search,
+)
+from app.services.suppliers.workbench import (
+    clear_user_selection,
+    fetch_single_line,
+    get_workbench_results,
+    save_manual_source,
+    save_mpn_override,
+    select_line_offer,
 )
 
 router = APIRouter(prefix="/official-pricing", tags=["official-pricing"])
@@ -116,6 +133,137 @@ def get_results(
         config=SupplierConfigStatus(**supplier_config_status(get_settings())),
         lines=lines,
     )
+
+
+@router.get("/workbench", response_model=WorkbenchResultsResponse)
+def get_workbench(
+    project_id: int = Query(...),
+    bom_version_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> WorkbenchResultsResponse:
+    try:
+        data = get_workbench_results(
+            db, project_id=project_id, bom_version_id=bom_version_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return WorkbenchResultsResponse(
+        project_id=project_id,
+        bom_version_id=bom_version_id,
+        config=SupplierConfigStatus(**supplier_config_status(get_settings())),
+        summary=WorkbenchSummary(**data["summary"]),
+        lines=[WorkbenchLineResult(**ln) for ln in data["lines"]],
+    )
+
+
+@router.post("/workbench/select", response_model=WorkbenchLineResult)
+def post_select_offer(
+    payload: SelectOfferRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> WorkbenchLineResult:
+    try:
+        row = select_line_offer(
+            db,
+            project_id=payload.project_id,
+            bom_version_id=payload.bom_version_id,
+            bom_line_id=payload.bom_line_id,
+            offer_type=payload.offer_type,
+            supplier=payload.supplier,
+            manually_approved_possible_match=payload.manually_approved_possible_match,
+            user_id=user_id,
+        )
+        return WorkbenchLineResult(**row)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/workbench/manual", response_model=WorkbenchLineResult)
+def post_manual_source(
+    payload: ManualSourceRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> WorkbenchLineResult:
+    try:
+        row = save_manual_source(
+            db,
+            project_id=payload.project_id,
+            bom_version_id=payload.bom_version_id,
+            bom_line_id=payload.bom_line_id,
+            supplier_name=payload.supplier_name,
+            supplier_part_number=payload.supplier_part_number,
+            unit_price=payload.unit_price,
+            currency=payload.currency,
+            stock=payload.stock,
+            lead_time=payload.lead_time,
+            note=payload.note,
+            user_id=user_id,
+        )
+        return WorkbenchLineResult(**row)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/workbench/mpn-override", response_model=WorkbenchLineResult)
+def patch_mpn_override(
+    payload: MpnOverrideRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> WorkbenchLineResult:
+    try:
+        row = save_mpn_override(
+            db,
+            project_id=payload.project_id,
+            bom_version_id=payload.bom_version_id,
+            bom_line_id=payload.bom_line_id,
+            search_mpn_override=payload.search_mpn_override,
+            user_id=user_id,
+        )
+        return WorkbenchLineResult(**row)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/workbench/fetch-line", response_model=WorkbenchLineResult)
+def post_fetch_line(
+    payload: FetchLineRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> WorkbenchLineResult:
+    try:
+        row = fetch_single_line(
+            db,
+            project_id=payload.project_id,
+            bom_version_id=payload.bom_version_id,
+            bom_line_id=payload.bom_line_id,
+            suppliers=payload.suppliers,
+            user_id=user_id,
+        )
+        return WorkbenchLineResult(**row)
+    except SupplierApiError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/workbench/reset-selection", response_model=WorkbenchLineResult)
+def post_reset_selection(
+    payload: SelectOfferRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> WorkbenchLineResult:
+    try:
+        row = clear_user_selection(
+            db,
+            project_id=payload.project_id,
+            bom_version_id=payload.bom_version_id,
+            bom_line_id=payload.bom_line_id,
+            user_id=user_id,
+        )
+        return WorkbenchLineResult(**row)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/create-snapshot", response_model=OfficialSnapshotCreateResponse)

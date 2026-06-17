@@ -202,8 +202,12 @@ function ProjectOverviewInner() {
   const bomHref = bomTableHref(pid, versionId);
   const qualityHref =
     versionId != null
-      ? `/quality?project_id=${pid}&version_id=${versionId}`
-      : `/quality?project_id=${pid}`;
+      ? `/bom?project_id=${pid}&version_id=${versionId}&tab=quality`
+      : `/bom?project_id=${pid}&tab=quality`;
+  const issuesHref =
+    versionId != null
+      ? `/bom?project_id=${pid}&version_id=${versionId}&tab=issues`
+      : `/bom?project_id=${pid}&tab=issues`;
   const chinaHref = `/china-quote?project_id=${pid}`;
   const pricingHref = metrics.latest_pricing_snapshot_id
     ? `/pricing-snapshots/${metrics.latest_pricing_snapshot_id}`
@@ -431,7 +435,7 @@ function ProjectOverviewInner() {
               ))}
             </ul>
           )}
-          <Link href={qualityHref} className="mt-3 inline-flex text-[12px] text-brand hover:underline">
+          <Link href={issuesHref} className="mt-3 inline-flex text-[12px] text-brand hover:underline">
             כל בעיות האיכות →
           </Link>
         </Card>

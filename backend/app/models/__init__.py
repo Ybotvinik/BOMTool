@@ -17,6 +17,7 @@ from app.models.project_file import ProjectFile
 from app.models.official_pricing import (
     OfficialPriceLine,
     OfficialPriceSnapshot,
+    OfficialPricingLineOverride,
     OfficialSupplierPriceResult,
     OfficialSupplierQuery,
 )
@@ -41,4 +42,5 @@ __all__ = [
     "OfficialSupplierPriceResult",
     "OfficialPriceSnapshot",
     "OfficialPriceLine",
+    "OfficialPricingLineOverride",
 ]

@@ -14,6 +14,7 @@ from app.services.export_excel import (
     build_customer_bom_review_xlsx,
     build_internal_bom_quality_xlsx,
     build_internal_pricing_snapshot_xlsx,
+    build_supplier_pricing_workbench_xlsx,
 )
 from app.services.file_storage import get_file_storage
 
@@ -21,6 +22,11 @@ router = APIRouter(prefix="/exports", tags=["exports"])
 
 
 class CustomerBomExportRequest(BaseModel):
+    project_id: int
+    bom_version_id: int
+
+
+class SupplierWorkbenchExportRequest(BaseModel):
     project_id: int
     bom_version_id: int
 
@@ -131,6 +137,33 @@ def export_customer_bom_review(
         bom_version_id=version.id,
         action_type="customer_export_created",
         change_summary=f"Customer BOM Review export '{file_name}'",
+    )
+    return _xlsx_response(content, file_name)
+
+
+@router.post("/supplier-pricing-workbench")
+def export_supplier_pricing_workbench(
+    payload: SupplierWorkbenchExportRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> Response:
+    project, version, _lines = _load_bom_version(
+        db, payload.project_id, payload.bom_version_id
+    )
+    content, file_name = build_supplier_pricing_workbench_xlsx(
+        db, project=project, version=version
+    )
+    _persist_export(
+        db,
+        project_id=project.id,
+        report_type="supplier_pricing_workbench",
+        file_name=file_name,
+        content=content,
+        user_id=user_id,
+        is_customer_safe=True,
+        bom_version_id=version.id,
+        action_type="supplier_workbench_export_created",
+        change_summary=f"Supplier pricing workbench export '{file_name}'",
     )
     return _xlsx_response(content, file_name)
 

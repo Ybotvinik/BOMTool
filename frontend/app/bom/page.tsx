@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RefreshCw, Upload, Loader2, AlertTriangle, Inbox, Pencil, Check, Search } from "lucide-react";
 import { Card, PageHeader, Kpi, Badge } from "@/components/ui";
+import { PageTabs } from "@/components/PageTabs";
+import { BomQualityPanel } from "@/components/bom/BomQualityPanel";
+import { BomIssuesPanel } from "@/components/bom/BomIssuesPanel";
 import { API_URL, apiGet, apiPost } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
 import { EditBomLineModal, type QualityLine } from "@/components/EditBomLineModal";
@@ -71,11 +74,20 @@ const FILTERS = [
   ["missing_qty", "Missing Qty"],
 ] as const;
 
+const BOM_TABS = [
+  { id: "lines", label: "שורות BOM" },
+  { id: "quality", label: "איכות BOM" },
+  { id: "issues", label: "חריגים / בעיות" },
+] as const;
+
+type BomTab = (typeof BOM_TABS)[number]["id"];
+
 function BomInner() {
   const router = useRouter();
   const params = useSearchParams();
   const urlProjectId = params.get("project_id");
   const urlVersionId = params.get("version_id");
+  const activeTab = (params.get("tab") as BomTab) || "lines";
   const { user } = useCurrentUser();
 
   const [pickerProjects, setPickerProjects] = useState<ApiProject[]>([]);
@@ -232,11 +244,16 @@ function BomInner() {
     return true;
   });
 
+  const tabQuery = {
+    project_id: scopedProjectId,
+    version_id: versionId,
+  };
+
   return (
     <>
       <PageHeader
         title="טבלת BOM"
-        subtitle="נתוני BOM אמיתיים + ניתוח איכות"
+        subtitle="נתוני BOM, ניתוח איכות וחריגים"
         actions={
           <>
             {projectVersions.length > 0 && (
@@ -259,9 +276,6 @@ function BomInner() {
             >
               <RefreshCw className="h-3.5 w-3.5" /> רענון
             </button>
-            <Link href="/quality" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50">
-              איכות BOM
-            </Link>
             <Link
               href={project ? `/upload-bom?project_id=${project.id}` : "/upload-bom"}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-brand text-brand-fg text-[12px] font-medium hover:bg-brand/90"
@@ -272,8 +286,10 @@ function BomInner() {
         }
       />
 
+      <PageTabs tabs={[...BOM_TABS]} activeTab={activeTab} basePath="/bom" query={tabQuery} />
+
       {/* Project / version identity */}
-      {(project || version) && (
+      {(project || version) && activeTab === "lines" && (
         <Card className="p-3 mb-3">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-1.5 text-[11.5px]">
             <Meta label="לקוח" value={customerName} />
@@ -303,7 +319,12 @@ function BomInner() {
             value=""
             onChange={(e) => {
               const v = e.target.value;
-              if (v) router.push(`/bom?project_id=${v}`);
+              if (v) {
+                const params = new URLSearchParams();
+                params.set("project_id", v);
+                if (activeTab !== "lines") params.set("tab", activeTab);
+                router.push(`/bom?${params.toString()}`);
+              }
             }}
             className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
           >
@@ -317,8 +338,14 @@ function BomInner() {
         </Card>
       )}
 
-      {/* Version header — legacy block removed; identity shown above */}
+      {activeTab === "quality" && <BomQualityPanel versionId={versionId} />}
 
+      {activeTab === "issues" && (
+        <BomIssuesPanel versionId={versionId} tabQuery={tabQuery} />
+      )}
+
+      {activeTab === "lines" && (
+      <>
       {/* Quality cards — only when a version is loaded */}
       {(status === "ok" || status === "empty") && (
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
@@ -438,7 +465,7 @@ function BomInner() {
         )}
       </Card>
 
-      {editing && (
+      {editing && activeTab === "lines" && (
         <EditBomLineModal
           line={editing}
           onClose={() => setEditing(null)}
@@ -447,6 +474,8 @@ function BomInner() {
             if (versionId) loadLines(versionId);
           }}
         />
+      )}
+      </>
       )}
     </>
   );

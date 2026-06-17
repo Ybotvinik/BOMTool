@@ -630,3 +630,80 @@ def build_internal_pricing_snapshot_xlsx(
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), file_name
+
+
+def supplier_workbench_filename(project_code: str, version_name: str) -> str:
+    return f"Supplier_Pricing_Workbench_{_safe_part(project_code)}_{_safe_part(version_name)}.xlsx"
+
+
+def build_supplier_pricing_workbench_xlsx(
+    db: Session,
+    *,
+    project: Project,
+    version: BomVersion,
+) -> tuple[bytes, str]:
+    from app.services.suppliers.workbench import get_workbench_results
+
+    version_label = version.version_name or version.version_label
+    file_name = supplier_workbench_filename(project.code, version_label)
+    data = get_workbench_results(
+        db, project_id=project.id, bom_version_id=version.id
+    )
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Supplier Pricing"
+    ws.sheet_view.rightToLeft = True
+
+    headers = [
+        "MPN",
+        "Manufacturer",
+        "Description",
+        "Required Qty",
+        "Source",
+        "Supplier PN",
+        "Unit Price",
+        "Extended Price",
+        "Stock",
+        "Status",
+        "Solution Status",
+        "Notes",
+    ]
+    forbidden = [
+        "china",
+        "internal",
+        "margin",
+        "savings",
+        "match confidence",
+        "buyer",
+    ]
+    for h in headers:
+        if any(f in h.lower() for f in forbidden):
+            raise ValueError(f"Unsafe workbench export header '{h}'")
+
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    for ln in data["lines"]:
+        ws.append(
+            [
+                ln.get("mpn"),
+                ln.get("manufacturer"),
+                ln.get("description"),
+                ln.get("required_qty"),
+                ln.get("source"),
+                ln.get("supplier_part_number"),
+                ln.get("unit_price"),
+                ln.get("extended_price"),
+                ln.get("stock"),
+                ln.get("status"),
+                ln.get("solution_status"),
+                ln.get("notes"),
+            ]
+        )
+
+    _autosize(ws)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), file_name

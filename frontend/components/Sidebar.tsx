@@ -4,7 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { Lock } from "lucide-react";
-import { NAV_ITEMS } from "@/lib/nav";
+import { NAV_ACTIVE_ALIASES, NAV_ITEMS } from "@/lib/nav";
+
+function isNavActive(pathname: string, href: string): boolean {
+  if (pathname === href) return true;
+  if (href !== "/projects" && pathname.startsWith(href)) return true;
+  const aliases = NAV_ACTIVE_ALIASES[href] ?? [];
+  return aliases.some((alias) => pathname === alias || pathname.startsWith(`${alias}/`));
+}
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -18,9 +25,7 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
         {NAV_ITEMS.map((item) => {
-          const active =
-            pathname === item.href ||
-            (item.href !== "/projects" && pathname.startsWith(item.href));
+          const active = isNavActive(pathname, item.href);
           const Icon = item.icon;
           return (
             <Link

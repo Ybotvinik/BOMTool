@@ -30,10 +30,23 @@ from app.services.suppliers.base import (
     normalize_mpn,
     supplier_result_to_dict,
 )
+from app.services.suppliers.pricing_store import (
+    DEFAULT_SUPPLIER_PRIORITY,
+    is_dnp_line,
+    latest_results_by_line,
+    save_supplier_result,
+)
 from app.services.suppliers.digikey import DigiKeyClient
 from app.services.suppliers.mouser import MouserClient
+from app.services.suppliers.workbench import (
+    _overrides_by_line,
+    _search_mpn_for_line,
+    resolve_line_selection,
+)
 
-DEFAULT_SUPPLIER_PRIORITY = [SUPPLIER_DIGIKEY, SUPPLIER_MOUSER]
+_is_dnp_line = is_dnp_line
+_latest_results_by_line = latest_results_by_line
+_save_result = save_supplier_result
 
 
 def supplier_config_status(settings: Settings | None = None) -> dict:
@@ -186,6 +199,8 @@ def fetch_official_pricing(
     )
     active_lines = [bl for bl in bom_lines if not _is_dnp_line(bl)]
 
+    overrides = _overrides_by_line(db, project_id, bom_version_id)
+
     if mode == "missing_only":
         existing = _latest_results_by_line(db, bom_version_id, valid_suppliers, settings=settings)
         lines_to_fetch = []
@@ -243,7 +258,8 @@ def fetch_official_pricing(
                     req_qty = compute_required_qty(
                         bl.quantity, version.build_quantity, bl.dnp
                     )
-                mpn = bl.cleaned_mpn or bl.mpn
+                ov = overrides.get(bl.id)
+                mpn = _search_mpn_for_line(bl, ov)
                 try:
                     result = client.search_by_mpn(mpn or "", float(req_qty or 0))
                     _save_result(
@@ -417,18 +433,10 @@ def _choose_best_result(
     candidates: list[OfficialSupplierPriceResult | None],
     priority: list[str],
 ) -> OfficialSupplierPriceResult | None:
-    valid = [c for c in candidates if c is not None and c.unit_price is not None]
-    if not valid:
-        return None
+    """Auto-select exact match only; possible_match excluded."""
+    from app.services.suppliers.workbench import _auto_select_exact
 
-    def sort_key(r: OfficialSupplierPriceResult) -> tuple:
-        pri = priority.index(r.supplier) if r.supplier in priority else 99
-        stock = 0 if (r.available_qty or 0) > 0 else 1
-        exact = 0 if r.is_exact_match else 1
-        price = float(r.unit_price or 0)
-        return (exact, stock, price, pri)
-
-    return sorted(valid, key=sort_key)[0]
+    return _auto_select_exact(candidates, priority)
 
 
 def create_official_snapshot(
@@ -448,6 +456,7 @@ def create_official_snapshot(
 
     priority = supplier_priority or DEFAULT_SUPPLIER_PRIORITY
     results_map = _latest_results_by_line(db, bom_version_id, priority, settings=settings)
+    overrides = _overrides_by_line(db, project_id, bom_version_id)
     is_mock = settings.supplier_api_mock
 
     snapshot = OfficialPriceSnapshot(
@@ -476,8 +485,17 @@ def create_official_snapshot(
         req_qty = bl.required_qty
         if req_qty is None:
             req_qty = compute_required_qty(bl.quantity, version.build_quantity, bl.dnp)
+        req_f = float(req_qty or 0)
+        override = overrides.get(bl.id)
+        sel = resolve_line_selection(
+            bl=bl,
+            req_qty=req_f,
+            results_map=results_map,
+            override=override,
+            priority=priority,
+        )
 
-        if _is_dnp_line(bl):
+        if sel.selected_source_type == "dnp":
             db.add(
                 OfficialPriceLine(
                     snapshot_id=snapshot.id,
@@ -493,10 +511,7 @@ def create_official_snapshot(
             priced += 1
             continue
 
-        candidates = [results_map.get((bl.id, s)) for s in priority]
-        best = _choose_best_result(candidates, priority)
-
-        if best is None or best.unit_price is None:
+        if sel.unit_price is None or sel.source == "TBD":
             db.add(
                 OfficialPriceLine(
                     snapshot_id=snapshot.id,
@@ -504,36 +519,47 @@ def create_official_snapshot(
                     required_qty=req_qty,
                     pricing_status="missing_price",
                     official_source="TBD",
+                    notes=sel.notes,
                 )
             )
             missing += 1
             continue
 
-        unit = Decimal(str(best.unit_price))
-        extended = unit * Decimal(str(req_qty or 0))
-        status = "priced" if best.is_exact_match else "needs_review"
-        if status == "priced":
-            priced += 1
-            total += extended
-        else:
+        unit = Decimal(str(sel.unit_price))
+        extended = Decimal(str(sel.extended_price or 0))
+        if sel.status in ("Needs Review", "No Stock") or sel.solution_status == "Needs Approval":
+            snap_status = "needs_review"
             needs_review += 1
-            total += extended
+        else:
+            snap_status = "priced"
+            priced += 1
+        total += extended
 
-        avail = "in_stock" if (best.available_qty or 0) > 0 else "unknown"
+        avail = "in_stock" if (sel.stock or 0) > 0 else "unknown"
+        note = sel.notes
+        if sel.manually_approved_possible_match:
+            note = f"manually approved possible_match; {note or ''}".strip()
+
+        display_source = sel.source
+        if sel.selected_source_type == "manual" and override and override.manual_supplier_name:
+            display_source = override.manual_supplier_name
+        elif display_source.startswith("Manual: "):
+            display_source = display_source.replace("Manual: ", "", 1)
+
         db.add(
             OfficialPriceLine(
                 snapshot_id=snapshot.id,
                 bom_line_id=bl.id,
-                selected_supplier=best.supplier,
-                selected_supplier_part_number=best.supplier_part_number,
-                official_source=SUPPLIER_DISPLAY_NAMES.get(best.supplier, best.supplier),
+                selected_supplier=sel.selected_supplier,
+                selected_supplier_part_number=sel.supplier_pn,
+                official_source=display_source,
                 official_unit_price=unit,
                 official_extended_price=extended,
                 required_qty=req_qty,
                 availability_status=avail,
-                lead_time=best.lead_time,
-                pricing_status=status,
-                notes=best.match_reason,
+                lead_time=sel.lead_time,
+                pricing_status=snap_status,
+                notes=note,
             )
         )
 

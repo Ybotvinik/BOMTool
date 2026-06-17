@@ -140,3 +140,49 @@ class OfficialPriceLine(Base):
         String(20), default="missing_price", server_default="missing_price", nullable=False
     )
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class OfficialPricingLineOverride(Base):
+    """Per-line workbench selection and search overrides (live pricing state)."""
+
+    __tablename__ = "official_pricing_line_overrides"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    bom_version_id: Mapped[int] = mapped_column(
+        ForeignKey("bom_versions.id", ondelete="CASCADE"), nullable=False
+    )
+    bom_line_id: Mapped[int] = mapped_column(
+        ForeignKey("bom_lines.id", ondelete="CASCADE"), nullable=False
+    )
+    search_mpn_override: Mapped[str | None] = mapped_column(String(120))
+    selected_source_type: Mapped[str | None] = mapped_column(String(20))
+    selected_supplier: Mapped[str | None] = mapped_column(String(20))
+    selected_supplier_part_number: Mapped[str | None] = mapped_column(String(120))
+    manual_supplier_name: Mapped[str | None] = mapped_column(String(120))
+    manual_supplier_part_number: Mapped[str | None] = mapped_column(String(120))
+    manual_unit_price: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    manual_currency: Mapped[str | None] = mapped_column(String(8))
+    manual_stock: Mapped[float | None] = mapped_column(Numeric(14, 4))
+    manual_lead_time: Mapped[str | None] = mapped_column(String(80))
+    user_selected: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    manually_approved_possible_match: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    note: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
