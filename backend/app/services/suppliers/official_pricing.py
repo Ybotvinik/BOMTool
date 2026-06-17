@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -43,6 +44,8 @@ from app.services.suppliers.workbench import (
     _search_mpn_for_line,
     resolve_line_selection,
 )
+
+logger = logging.getLogger(__name__)
 
 _is_dnp_line = is_dnp_line
 _latest_results_by_line = latest_results_by_line
@@ -180,15 +183,27 @@ def fetch_official_pricing(
     if not valid_suppliers:
         raise ValueError("No valid suppliers selected")
 
-    if not settings.supplier_api_mock:
-        for s in valid_suppliers:
-            client = _client_for_supplier(s, settings)
-            if not client.credentials_configured():
-                name = SUPPLIER_DISPLAY_NAMES.get(s, s)
-                raise SupplierApiError(
-                    f"{name} API credentials missing",
-                    supplier=s,
-                )
+    fetch_suppliers: list[str] = []
+    skipped_suppliers: list[str] = []
+    for s in valid_suppliers:
+        if settings.supplier_api_mock:
+            fetch_suppliers.append(s)
+            continue
+        client = _client_for_supplier(s, settings)
+        if client.credentials_configured():
+            fetch_suppliers.append(s)
+        else:
+            name = SUPPLIER_DISPLAY_NAMES.get(s, s)
+            skipped_suppliers.append(name)
+            logger.warning("%s skipped — API credentials missing", name)
+
+    if not fetch_suppliers and not settings.supplier_api_mock:
+        if skipped_suppliers:
+            raise SupplierApiError(
+                f"No supplier credentials configured for: {', '.join(skipped_suppliers)}",
+                supplier=None,
+            )
+        raise ValueError("No suppliers available to fetch")
 
     bom_lines = list(
         db.scalars(
@@ -202,12 +217,12 @@ def fetch_official_pricing(
     overrides = _overrides_by_line(db, project_id, bom_version_id)
 
     if mode == "missing_only":
-        existing = _latest_results_by_line(db, bom_version_id, valid_suppliers, settings=settings)
+        existing = _latest_results_by_line(db, bom_version_id, fetch_suppliers, settings=settings)
         lines_to_fetch = []
         for bl in active_lines:
             has_price = any(
                 existing.get((bl.id, s)) and existing[(bl.id, s)].unit_price is not None
-                for s in valid_suppliers
+                for s in fetch_suppliers
             )
             if not has_price:
                 lines_to_fetch.append(bl)
@@ -222,8 +237,13 @@ def fetch_official_pricing(
         entity_type="bom_version",
         entity_name=version.version_name or version.version_label,
         change_summary=(
-            f"Official pricing fetch started for suppliers {', '.join(valid_suppliers)} "
+            f"Official pricing fetch started for suppliers {', '.join(fetch_suppliers)} "
             f"({len(lines_to_fetch)} lines)"
+            + (
+                f"; skipped (no credentials): {', '.join(skipped_suppliers)}"
+                if skipped_suppliers
+                else ""
+            )
         ),
         commit=False,
     )
@@ -234,7 +254,7 @@ def fetch_official_pricing(
     error_count = 0
     is_mock = settings.supplier_api_mock
 
-    for supplier in valid_suppliers:
+    for supplier in fetch_suppliers:
         query = OfficialSupplierQuery(
             project_id=project_id,
             bom_version_id=bom_version_id,

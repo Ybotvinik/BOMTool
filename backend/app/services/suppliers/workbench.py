@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -36,6 +37,8 @@ from app.services.suppliers.pricing_store import (
     latest_results_by_line,
     save_supplier_result,
 )
+
+logger = logging.getLogger(__name__)
 
 SOURCE_TYPE_SUPPLIER = "supplier"
 SOURCE_TYPE_MANUAL = "manual"
@@ -179,9 +182,42 @@ def _result_for_supplier(
 
 
 def _manual_source_label(name: str | None) -> str:
-    if not name:
-        return "Manual"
-    return f"Manual: {name}"
+    return "Manual"
+
+
+def _is_manual_override(override: OfficialPricingLineOverride | None) -> bool:
+    if override is None or override.manual_unit_price is None:
+        return False
+    if override.selected_source_type == SOURCE_TYPE_MANUAL:
+        return True
+    # Legacy rows: manual fields saved without selected_source_type=manual.
+    return bool(
+        override.user_selected
+        and override.selected_source_type not in (SOURCE_TYPE_SUPPLIER, SOURCE_TYPE_TBD, SOURCE_TYPE_DNP)
+    )
+
+
+def _resolved_manual_selection(
+    override: OfficialPricingLineOverride, req_qty: float
+) -> ResolvedSelection:
+    unit = float(override.manual_unit_price) if override.manual_unit_price is not None else None
+    ext = unit * req_qty if unit is not None else None
+    has_price = unit is not None
+    note_parts = [p for p in [override.manual_supplier_name, override.note] if p]
+    return ResolvedSelection(
+        source=_manual_source_label(override.manual_supplier_name),
+        supplier_pn=override.manual_supplier_part_number,
+        unit_price=unit,
+        extended_price=ext,
+        stock=float(override.manual_stock) if override.manual_stock is not None else None,
+        currency=override.manual_currency or "USD",
+        lead_time=override.manual_lead_time,
+        status=STATUS_MANUAL,
+        solution_status=SOLUTION_HAS if has_price else SOLUTION_NEEDS_APPROVAL,
+        notes=" — ".join(note_parts) if note_parts else None,
+        selected_supplier=None,
+        selected_source_type=SOURCE_TYPE_MANUAL,
+    )
 
 
 def resolve_line_selection(
@@ -212,26 +248,28 @@ def resolve_line_selection(
             selected_source_type=SOURCE_TYPE_DNP,
         )
 
-    if override and override.user_selected:
-        if override.selected_source_type == SOURCE_TYPE_MANUAL:
-            unit = float(override.manual_unit_price) if override.manual_unit_price is not None else None
-            ext = unit * req_qty if unit is not None else None
-            has_price = unit is not None
-            return ResolvedSelection(
-                source=_manual_source_label(override.manual_supplier_name),
-                supplier_pn=override.manual_supplier_part_number,
-                unit_price=unit,
-                extended_price=ext,
-                stock=float(override.manual_stock) if override.manual_stock is not None else None,
-                currency=override.manual_currency or "USD",
-                lead_time=override.manual_lead_time,
-                status=STATUS_MANUAL,
-                solution_status=SOLUTION_HAS if has_price else SOLUTION_NEEDS_APPROVAL,
-                notes=override.note,
-                selected_supplier=None,
-                selected_source_type=SOURCE_TYPE_MANUAL,
-            )
+    # Persisted manual override — always wins over auto-selection.
+    if _is_manual_override(override):
+        assert override is not None
+        return _resolved_manual_selection(override, req_qty)
 
+    if override and override.user_selected and override.selected_source_type == SOURCE_TYPE_DNP:
+        return ResolvedSelection(
+            source="DNP",
+            supplier_pn=None,
+            unit_price=None,
+            extended_price=0.0,
+            stock=None,
+            currency="USD",
+            lead_time=None,
+            status=STATUS_DNP,
+            solution_status=SOLUTION_DNP,
+            notes=override.note or "DNP / Not populated",
+            selected_supplier=None,
+            selected_source_type=SOURCE_TYPE_DNP,
+        )
+
+    if override and override.user_selected:
         if override.selected_source_type == SOURCE_TYPE_TBD:
             possible = _has_possible_match(
                 [_result_for_supplier(results_map, bl.id, s) for s in priority]
@@ -534,6 +572,12 @@ def save_manual_source(
     note: str | None = None,
     user_id: int | None,
 ) -> dict:
+    name = (supplier_name or "").strip()
+    if not name:
+        raise ValueError("supplier_name is required")
+    if unit_price is None or unit_price < 0:
+        raise ValueError("unit_price must be a non-negative number")
+
     override = _get_or_create_override(
         db,
         project_id=project_id,
@@ -544,15 +588,31 @@ def save_manual_source(
     override.user_selected = True
     override.selected_source_type = SOURCE_TYPE_MANUAL
     override.selected_supplier = None
-    override.manual_supplier_name = supplier_name
-    override.manual_supplier_part_number = supplier_part_number
+    override.selected_supplier_part_number = None
+    override.manually_approved_possible_match = False
+    override.manual_supplier_name = name
+    override.manual_supplier_part_number = (supplier_part_number or "").strip() or None
     override.manual_unit_price = unit_price
-    override.manual_currency = currency
+    override.manual_currency = currency or "USD"
     override.manual_stock = stock
-    override.manual_lead_time = lead_time
-    override.note = note
+    override.manual_lead_time = (lead_time or "").strip() or None
+    override.note = (note or "").strip() or None
     override.updated_by_user_id = user_id
     db.commit()
+    db.expire_all()
+
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="official_pricing_manual_source",
+        project_id=project_id,
+        entity_type="bom_line",
+        entity_name=name,
+        change_summary=(
+            f"Manual supplier source for line {bom_line_id}: {name} @ {unit_price} {currency or 'USD'}"
+        ),
+        commit=True,
+    )
     return get_workbench_line(db, project_id=project_id, bom_version_id=bom_version_id, bom_line_id=bom_line_id)
 
 
@@ -612,6 +672,23 @@ def fetch_single_line(
     if not valid:
         raise ValueError("No valid suppliers")
 
+    fetch_suppliers: list[str] = []
+    for supplier in valid:
+        if settings.supplier_api_mock:
+            fetch_suppliers.append(supplier)
+            continue
+        client = _client_for_supplier(supplier, settings)
+        if client.credentials_configured():
+            fetch_suppliers.append(supplier)
+        else:
+            logger.warning(
+                "%s skipped for line refetch — credentials missing",
+                SUPPLIER_DISPLAY_NAMES.get(supplier, supplier),
+            )
+
+    if not fetch_suppliers and not settings.supplier_api_mock:
+        raise SupplierApiError("No configured suppliers available for fetch", supplier=None)
+
     override = db.scalar(
         select(OfficialPricingLineOverride).where(
             OfficialPricingLineOverride.project_id == project_id,
@@ -625,13 +702,7 @@ def fetch_single_line(
         req_qty = compute_required_qty(bl.quantity, version.build_quantity, bl.dnp)
 
     is_mock = settings.supplier_api_mock
-    for supplier in valid:
-        if not settings.supplier_api_mock:
-            client = _client_for_supplier(supplier, settings)
-            if not client.credentials_configured():
-                name = SUPPLIER_DISPLAY_NAMES.get(supplier, supplier)
-                raise SupplierApiError(f"{name} API credentials missing", supplier=supplier)
-
+    for supplier in fetch_suppliers:
         query = OfficialSupplierQuery(
             project_id=project_id,
             bom_version_id=bom_version_id,

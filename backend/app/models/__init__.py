@@ -9,6 +9,7 @@ from app.models.customer import Customer
 from app.models.project import Project
 from app.models.bom_version import BomVersion
 from app.models.bom_line import BomLine
+from app.models.bom_line_override import BomLineOverride
 from app.models.supplier_quote import SupplierQuote, SupplierQuoteLine
 from app.models.pricing import PricingSnapshot, PricingLine
 from app.models.export_report import ExportReport
@@ -29,6 +30,7 @@ __all__ = [
     "Project",
     "BomVersion",
     "BomLine",
+    "BomLineOverride",
     "SupplierQuote",
     "SupplierQuoteLine",
     "PricingSnapshot",

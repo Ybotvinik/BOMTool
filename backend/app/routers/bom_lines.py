@@ -7,14 +7,18 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user_id
 from app.models import BomLine, BomVersion
-from app.schemas.bom_line import BomLineCreate, BomLineEdit, BomLineRead
+from app.schemas.bom_line import (
+    BomLineCreate,
+    BomLineEdit,
+    BomLineOverrideRequest,
+    BomLineQualityReviewRequest,
+    BomLineRead,
+)
 from app.services.activity import log_activity
-from app.services.bom_quality import (
-    clean_mpn,
-    compute_quality_summary,
-    compute_required_qty,
+from app.services.bom_line_override import (
     line_to_quality_dict,
-    reanalyze_bom_version_quality,
+    save_line_override,
+    save_quality_review,
 )
 
 router = APIRouter(prefix="/bom-lines", tags=["bom_lines"])
@@ -65,10 +69,10 @@ def get_bom_line(line_id: int, db: Session = Depends(get_db)) -> BomLine:
     return line
 
 
-@router.patch("/{line_id}")
-def update_bom_line(
+@router.patch("/{line_id}/override")
+def patch_line_override(
     line_id: int,
-    payload: BomLineEdit,
+    payload: BomLineOverrideRequest,
     db: Session = Depends(get_db),
     user_id: int | None = Depends(get_current_user_id),
 ) -> dict:
@@ -77,46 +81,107 @@ def update_bom_line(
         raise HTTPException(status_code=404, detail="BOM line not found")
 
     data = payload.model_dump(exclude_unset=True)
-    changed: list[str] = []
-
-    # Map quality-API field names onto the model.
-    field_map = {
-        "original_mpn": "mpn",
-        "manufacturer": "manufacturer",
-        "original_description": "description",
-        "reference_designators": "reference_designators",
-        "footprint": "footprint",
-        "value_text": "value",
-        "is_dnp": "dnp",
-        "notes": "notes",
-    }
-    for api_field, model_field in field_map.items():
-        if api_field in data:
-            new_val = data[api_field]
-            if getattr(line, model_field) != new_val:
-                changed.append(api_field)
-            setattr(line, model_field, new_val)
-
-    if "qty_per_assembly" in data:
-        if line.quantity != data["qty_per_assembly"]:
-            changed.append("qty_per_assembly")
-        line.quantity = data["qty_per_assembly"]
-
-    # Recalculate cleaned_mpn (unless explicitly provided).
-    if "cleaned_mpn" in data and data["cleaned_mpn"] is not None:
-        line.cleaned_mpn = clean_mpn(data["cleaned_mpn"])
-    elif "original_mpn" in data:
-        line.cleaned_mpn = clean_mpn(line.mpn)
+    try:
+        line, override, summary = save_line_override(
+            db,
+            line=line,
+            mpn=data.get("mpn"),
+            manufacturer=data.get("manufacturer"),
+            description=data.get("description"),
+            quantity=data.get("quantity"),
+            dnp=data.get("dnp"),
+            correction_note=data.get("correction_note"),
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     version = db.get(BomVersion, line.bom_version_id)
-    build_qty = version.build_quantity if version else None
-    line.required_qty = compute_required_qty(line.quantity, build_qty, line.dnp)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="bom_line_override_saved",
+        project_id=version.project_id if version else None,
+        entity_type="bom_line",
+        entity_name=line.mpn,
+        change_summary=f"Saved quality override for BOM line #{line.line_no}",
+        commit=False,
+    )
+    db.commit()
+    return {
+        "line": line_to_quality_dict(line, override),
+        "quality_summary": {"bom_version_id": line.bom_version_id, **summary},
+    }
 
-    db.flush()
-    # Re-run quality for the full version (duplicate context may change).
-    analyzed = reanalyze_bom_version_quality(db, line.bom_version_id)
-    summary = compute_quality_summary(analyzed)
 
+@router.post("/{line_id}/quality-review")
+def post_quality_review(
+    line_id: int,
+    payload: BomLineQualityReviewRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    line = db.get(BomLine, line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="BOM line not found")
+    try:
+        line, override, summary = save_quality_review(
+            db, line=line, note=payload.note, user_id=user_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    version = db.get(BomVersion, line.bom_version_id)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="bom_line_quality_reviewed",
+        project_id=version.project_id if version else None,
+        entity_type="bom_line",
+        entity_name=line.mpn,
+        change_summary=f"Marked BOM line #{line.line_no} as quality-reviewed",
+        commit=False,
+    )
+    db.commit()
+    return {
+        "line": line_to_quality_dict(line, override),
+        "quality_summary": {"bom_version_id": line.bom_version_id, **summary},
+    }
+
+
+@router.patch("/{line_id}")
+def update_bom_line(
+    line_id: int,
+    payload: BomLineEdit,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    """Legacy direct edit — delegates to override storage to preserve originals."""
+    line = db.get(BomLine, line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="BOM line not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    override_payload: dict = {}
+    if "original_mpn" in data:
+        override_payload["mpn"] = data["original_mpn"]
+    if "manufacturer" in data:
+        override_payload["manufacturer"] = data["manufacturer"]
+    if "original_description" in data:
+        override_payload["description"] = data["original_description"]
+    if "qty_per_assembly" in data:
+        override_payload["quantity"] = (
+            float(data["qty_per_assembly"]) if data["qty_per_assembly"] is not None else None
+        )
+    if "is_dnp" in data:
+        override_payload["dnp"] = data["is_dnp"]
+    if "notes" in data:
+        override_payload["correction_note"] = data["notes"]
+
+    line, override, summary = save_line_override(
+        db, line=line, user_id=user_id, **override_payload
+    )
+    version = db.get(BomVersion, line.bom_version_id)
     log_activity(
         db,
         user_id=user_id,
@@ -124,16 +189,12 @@ def update_bom_line(
         project_id=version.project_id if version else None,
         entity_type="bom_line",
         entity_name=line.mpn,
-        change_summary=(
-            f"Updated BOM line #{line.line_no} ({line.mpn or '—'}); "
-            f"changed: {', '.join(changed) if changed else 'none'}"
-        ),
+        change_summary=f"Updated BOM line #{line.line_no} via override",
         commit=False,
     )
     db.commit()
-    db.refresh(line)
     return {
-        "line": line_to_quality_dict(line),
+        "line": line_to_quality_dict(line, override),
         "quality_summary": {"bom_version_id": line.bom_version_id, **summary},
     }
 
@@ -144,31 +205,19 @@ def mark_reviewed(
     db: Session = Depends(get_db),
     user_id: int | None = Depends(get_current_user_id),
 ) -> dict:
+    """Legacy alias for quality-review without note."""
     line = db.get(BomLine, line_id)
     if line is None:
         raise HTTPException(status_code=404, detail="BOM line not found")
-    if line.quality_status == "error":
-        raise HTTPException(
-            status_code=409,
-            detail="לא ניתן לסמן כנבדק כל עוד קיימת שגיאה קריטית בשורה",
-        )
-    line.needs_review = False
-    line.reviewed_at = datetime.now(timezone.utc)
-    line.reviewed_by_user_id = user_id
-    version = db.get(BomVersion, line.bom_version_id)
-    log_activity(
-        db,
-        user_id=user_id,
-        action_type="bom_line_reviewed",
-        project_id=version.project_id if version else None,
-        entity_type="bom_line",
-        entity_name=line.mpn,
-        change_summary=f"Marked BOM line #{line.line_no} ({line.mpn or '—'}) as reviewed",
-        commit=False,
-    )
+    try:
+        line, override, summary = save_quality_review(db, line=line, note=None, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     db.commit()
-    db.refresh(line)
-    return {"line": line_to_quality_dict(line)}
+    return {
+        "line": line_to_quality_dict(line, override),
+        "quality_summary": {"bom_version_id": line.bom_version_id, **summary},
+    }
 
 
 @router.delete("/{line_id}", status_code=status.HTTP_204_NO_CONTENT)

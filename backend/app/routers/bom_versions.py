@@ -12,9 +12,14 @@ from app.schemas.bom_version import (
     BomVersionUpdate,
 )
 from app.services.activity import log_activity
+from app.services.bom_quality import reanalyze_bom_version_quality
+from app.services.bom_line_override import (
+    line_to_quality_dict,
+    open_quality_issues,
+    quality_lines_for_version,
+)
 from app.services.bom_quality import (
     compute_quality_summary,
-    line_to_quality_dict,
     reanalyze_bom_version_quality,
 )
 
@@ -52,6 +57,14 @@ def _version_lines(db: Session, version_id: int) -> list[BomLine]:
             .order_by(BomLine.line_no, BomLine.id)
         )
     )
+
+
+@router.get("/{version_id}/quality-lines")
+def quality_lines(version_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    version = db.get(BomVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="BOM version not found")
+    return quality_lines_for_version(db, version_id)
 
 
 @router.get("/{version_id}/quality-summary")
@@ -95,12 +108,7 @@ def quality_issues(version_id: int, db: Session = Depends(get_db)) -> list[dict]
     version = db.get(BomVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="BOM version not found")
-    issues = [
-        line_to_quality_dict(ln)
-        for ln in _version_lines(db, version_id)
-        if ln.needs_review or ln.quality_status != "ok"
-    ]
-    return issues
+    return open_quality_issues(db, version_id)
 
 
 @router.post("", response_model=BomVersionRead, status_code=status.HTTP_201_CREATED)
@@ -143,8 +151,17 @@ def update_bom_version(
     version = db.get(BomVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="BOM version not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "build_quantity" in data:
+        bq = data["build_quantity"]
+        if bq is not None and bq <= 0:
+            raise HTTPException(
+                status_code=400, detail="כמות להרכבה חייבת להיות מספר חיובי"
+            )
+    for field, value in data.items():
         setattr(version, field, value)
+    if "build_quantity" in data:
+        reanalyze_bom_version_quality(db, version_id)
     db.commit()
     db.refresh(version)
     log_activity(

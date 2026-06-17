@@ -223,6 +223,8 @@ function OfficialPricingPageInner() {
   const [mpnEditLine, setMpnEditLine] = useState<WorkbenchLine | null>(null);
   const [mpnOverride, setMpnOverride] = useState("");
   const [manualLine, setManualLine] = useState<WorkbenchLine | null>(null);
+  const [manualBusy, setManualBusy] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
   const [manualForm, setManualForm] = useState({
     supplier_name: "",
     supplier_part_number: "",
@@ -401,26 +403,43 @@ function OfficialPricingPageInner() {
 
   async function saveManual() {
     if (projectId == null || versionId == null || !manualLine) return;
-    const row = await apiPost<WorkbenchLine>(
-      "/api/official-pricing/workbench/manual",
-      {
-        project_id: projectId,
-        bom_version_id: versionId,
-        bom_line_id: manualLine.bom_line_id,
-        supplier_name: manualForm.supplier_name,
-        supplier_part_number: manualForm.supplier_part_number || null,
-        unit_price: Number(manualForm.unit_price),
-        currency: manualForm.currency,
-        stock: manualForm.stock ? Number(manualForm.stock) : null,
-        lead_time: manualForm.lead_time || null,
-        note: manualForm.note || null,
-      },
-      user.id,
-    );
-    updateLine(row);
-    setManualLine(null);
-    setDrawerLine(null);
-    await loadWorkbench();
+    if (!manualForm.supplier_name.trim()) {
+      setManualError("שם ספק הוא שדה חובה");
+      return;
+    }
+    const unit = Number(manualForm.unit_price);
+    if (manualForm.unit_price === "" || Number.isNaN(unit) || unit < 0) {
+      setManualError("מחיר יחידה חייב להיות מספר תקין (≥ 0)");
+      return;
+    }
+    setManualBusy(true);
+    setManualError(null);
+    try {
+      const row = await apiPost<WorkbenchLine>(
+        "/api/official-pricing/workbench/manual",
+        {
+          project_id: projectId,
+          bom_version_id: versionId,
+          bom_line_id: manualLine.bom_line_id,
+          supplier_name: manualForm.supplier_name.trim(),
+          supplier_part_number: manualForm.supplier_part_number.trim() || null,
+          unit_price: unit,
+          currency: manualForm.currency.trim() || "USD",
+          stock: manualForm.stock ? Number(manualForm.stock) : null,
+          lead_time: manualForm.lead_time.trim() || null,
+          note: manualForm.note.trim() || null,
+        },
+        user.id,
+      );
+      updateLine(row);
+      await loadWorkbench();
+      setManualLine(null);
+      setDrawerLine(null);
+    } catch (e) {
+      setManualError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setManualBusy(false);
+    }
   }
 
   async function saveMpnOverride() {
@@ -713,14 +732,18 @@ function OfficialPricingPageInner() {
         onOpenManual={() => {
           if (drawerLine) {
             setManualLine(drawerLine);
+            setManualError(null);
             setManualForm({
-              supplier_name: "",
-              supplier_part_number: "",
-              unit_price: "",
-              currency: "USD",
-              stock: "",
-              lead_time: "",
-              note: "",
+              supplier_name:
+                drawerLine.selected_source_type === "manual" && drawerLine.notes
+                  ? drawerLine.notes.split(" — ")[0]
+                  : "",
+              supplier_part_number: drawerLine.supplier_part_number ?? "",
+              unit_price: drawerLine.unit_price != null ? String(drawerLine.unit_price) : "",
+              currency: drawerLine.currency || "USD",
+              stock: drawerLine.stock != null ? String(drawerLine.stock) : "",
+              lead_time: drawerLine.lead_time ?? "",
+              note: drawerLine.notes ?? "",
             });
           }
         }}
@@ -753,6 +776,11 @@ function OfficialPricingPageInner() {
           <div className="absolute inset-0 bg-black/30" onClick={() => setManualLine(null)} />
           <Card className="relative w-full max-w-md p-4 z-10 space-y-2">
             <h3 className="text-[14px] font-bold">מקור ידני (Manual)</h3>
+            {manualError && (
+              <p className="text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1.5">
+                {manualError}
+              </p>
+            )}
             {[
               ["supplier_name", "שם ספק", "text"],
               ["supplier_part_number", "מק״ט ספק", "text"],
@@ -773,8 +801,22 @@ function OfficialPricingPageInner() {
               </div>
             ))}
             <div className="flex gap-2 pt-2 justify-end">
-              <button type="button" onClick={() => setManualLine(null)} className="h-8 px-3 rounded-md border text-[12px]">ביטול</button>
-              <button type="button" onClick={saveManual} className="h-8 px-3 rounded-md bg-brand text-white text-[12px]">שמור</button>
+              <button
+                type="button"
+                onClick={() => setManualLine(null)}
+                disabled={manualBusy}
+                className="h-8 px-3 rounded-md border text-[12px] disabled:opacity-50"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={saveManual}
+                disabled={manualBusy}
+                className="h-8 px-3 rounded-md bg-brand text-white text-[12px] disabled:opacity-50"
+              >
+                {manualBusy ? "שומר…" : "שמור"}
+              </button>
             </div>
           </Card>
         </div>

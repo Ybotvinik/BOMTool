@@ -33,7 +33,7 @@ export function PageTabs({
   }
 
   return (
-    <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
+    <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-3 bg-slate-50/40 rounded-t-lg px-1 pt-1">
       {tabs.map((tab) => {
         const active = activeTab === tab.id;
         return (
@@ -41,10 +41,10 @@ export function PageTabs({
             key={tab.id}
             href={hrefFor(tab.id)}
             className={clsx(
-              "px-3 py-2 text-[12.5px] font-medium border-b-2 -mb-px transition-colors",
+              "px-3 py-2 text-[12.5px] font-medium border-b-2 -mb-px rounded-t-md transition-colors",
               active
-                ? "border-brand text-brand"
-                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300",
+                ? "border-brand text-brand bg-white shadow-sm"
+                : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 hover:bg-white/60",
             )}
           >
             {tab.label}

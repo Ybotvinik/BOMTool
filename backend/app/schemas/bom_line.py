@@ -62,6 +62,19 @@ class BomLineEdit(BaseModel):
     notes: str | None = None
 
 
+class BomLineOverrideRequest(BaseModel):
+    mpn: str | None = None
+    manufacturer: str | None = None
+    description: str | None = None
+    quantity: float | None = None
+    dnp: bool | None = None
+    correction_note: str | None = None
+
+
+class BomLineQualityReviewRequest(BaseModel):
+    note: str | None = None
+
+
 class BomLineRead(BomLineBase, ORMModel):
     id: int
     created_at: datetime

@@ -1,8 +1,9 @@
-"""Mouser official supplier API client."""
+"""Mouser Search API client (Search API only — not Order API)."""
 
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 MOUSER_API_BASE = "https://api.mouser.com/api/v1"
 
 
+def _redact_api_key(text: str) -> str:
+    return re.sub(r"apiKey=[^&\s\"']+", "apiKey=***", text, flags=re.IGNORECASE)
+
+
 def _mouser_errors(data: dict) -> list[str]:
     errors = data.get("Errors") or []
     if not isinstance(errors, list):
@@ -36,10 +41,7 @@ def _mouser_errors(data: dict) -> list[str]:
     ]
 
 
-def _parse_mouser_part(part: dict, *, searched: str, mpn: str, required_qty: float, raw: dict) -> SupplierPriceResult:
-    mfr_mpn = part.get("ManufacturerPartNumber")
-    exact = mpn_exact_match(searched, mfr_mpn)
-
+def _price_breaks_from_part(part: dict) -> list[tuple[float, float]]:
     breaks: list[tuple[float, float]] = []
     for pb in part.get("PriceBreaks") or []:
         if not isinstance(pb, dict):
@@ -48,13 +50,42 @@ def _parse_mouser_part(part: dict, *, searched: str, mpn: str, required_qty: flo
         price = parse_money(pb.get("Price"))
         if qty is not None and price is not None:
             breaks.append((qty, price))
+    return breaks
 
-    unit_price, break_qty = select_price_break(breaks, required_qty or 1)
+
+def _stock_from_part(part: dict) -> float | None:
     qty_available = decimal_or_none(part.get("AvailabilityInStock"))
-    if qty_available is None:
-        avail_text = part.get("Availability") or ""
-        digits = "".join(ch for ch in str(avail_text) if ch.isdigit())
-        qty_available = decimal_or_none(digits) if digits else None
+    if qty_available is not None:
+        return qty_available
+    avail_text = part.get("Availability") or ""
+    digits = "".join(ch for ch in str(avail_text) if ch.isdigit())
+    return decimal_or_none(digits) if digits else None
+
+
+def _part_sort_key(part: dict, *, searched: str, required_qty: float) -> tuple:
+    exact = mpn_exact_match(searched, part.get("ManufacturerPartNumber"))
+    stock = _stock_from_part(part) or 0
+    breaks = _price_breaks_from_part(part)
+    unit_price, _ = select_price_break(breaks, required_qty or 1)
+    price = unit_price if unit_price is not None else 999999.0
+    return (0 if exact else 1, 0 if stock > 0 else 1, price)
+
+
+def _pick_best_part(parts: list[dict], *, searched: str, required_qty: float) -> dict:
+    return min(parts, key=lambda p: _part_sort_key(p, searched=searched, required_qty=required_qty))
+
+
+def _parse_mouser_part(
+    part: dict, *, searched: str, mpn: str, required_qty: float, raw: dict
+) -> SupplierPriceResult:
+    mfr_mpn = part.get("ManufacturerPartNumber")
+    if isinstance(mfr_mpn, str):
+        mfr_mpn = mfr_mpn.strip() or None
+    exact = mpn_exact_match(searched, mfr_mpn)
+
+    breaks = _price_breaks_from_part(part)
+    unit_price, break_qty = select_price_break(breaks, required_qty or 1)
+    qty_available = _stock_from_part(part)
 
     if exact and unit_price is not None:
         status = "matched"
@@ -70,6 +101,7 @@ def _parse_mouser_part(part: dict, *, searched: str, mpn: str, required_qty: flo
         supplier=SUPPLIER_MOUSER,
         mpn=mpn,
         manufacturer=part.get("Manufacturer"),
+        matched_mpn=mfr_mpn,
         supplier_part_number=part.get("MouserPartNumber"),
         product_url=part.get("ProductDetailUrl"),
         description=part.get("Description"),
@@ -113,12 +145,15 @@ class MouserClient:
                     resp = client.post(url, headers=headers, json=body)
                 if resp.status_code >= 400:
                     raise SupplierApiError(
-                        f"Mouser API error {resp.status_code}: {resp.text[:500]}",
+                        _redact_api_key(
+                            f"Mouser API error {resp.status_code}: {resp.text[:500]}"
+                        ),
                         supplier=SUPPLIER_MOUSER,
                     )
                 data = resp.json()
                 api_errors = _mouser_errors(data)
-                if api_errors and not (data.get("SearchResults") or {}).get("Parts"):
+                parts = (data.get("SearchResults") or {}).get("Parts") or []
+                if api_errors and not parts:
                     raise SupplierApiError(
                         f"Mouser API returned errors: {'; '.join(api_errors)}",
                         supplier=SUPPLIER_MOUSER,
@@ -131,7 +166,7 @@ class MouserClient:
                 if attempt < retries:
                     time.sleep(0.5 * (attempt + 1))
         raise SupplierApiError(
-            f"Mouser API request failed: {last_error}",
+            _redact_api_key(f"Mouser API request failed: {last_error}"),
             supplier=SUPPLIER_MOUSER,
         )
 
@@ -139,6 +174,17 @@ class MouserClient:
         search_results = data.get("SearchResults") or {}
         parts = search_results.get("Parts") or []
         return [p for p in parts if isinstance(p, dict)]
+
+    def _keyword_search(self, keyword: str) -> tuple[dict, list[dict]]:
+        body = {
+            "SearchByKeywordRequest": {
+                "keyword": keyword,
+                "records": 50,
+                "startingRecord": 0,
+            }
+        }
+        data = self._post("/search/keyword", body)
+        return data, self._extract_parts(data)
 
     def search_by_mpn(self, mpn: str, required_qty: float) -> SupplierPriceResult:
         if self.settings.supplier_api_mock:
@@ -154,26 +200,7 @@ class MouserClient:
             )
 
         try:
-            # Exact part-number search first (works with manufacturer MPN)
-            pn_body = {
-                "SearchByPartRequest": {
-                    "mouserPartNumber": searched,
-                    "partSearchOptions": "Exact",
-                }
-            }
-            data = self._post("/search/partnumber", pn_body)
-            parts = self._extract_parts(data)
-
-            if not parts:
-                kw_body = {
-                    "SearchByKeywordRequest": {
-                        "keyword": searched,
-                        "records": 10,
-                        "startingRecord": 0,
-                    }
-                }
-                data = self._post("/search/keyword", kw_body)
-                parts = self._extract_parts(data)
+            data, parts = self._keyword_search(searched)
 
             if not parts:
                 logger.info("Mouser no products for MPN=%s", searched)
@@ -185,11 +212,13 @@ class MouserClient:
                     raw_response=data,
                 )
 
-            best = parts[0]
-            for part in parts:
-                if mpn_exact_match(searched, part.get("ManufacturerPartNumber")):
-                    best = part
-                    break
+            exact_parts = [
+                p
+                for p in parts
+                if mpn_exact_match(searched, p.get("ManufacturerPartNumber"))
+            ]
+            pool = exact_parts if exact_parts else parts
+            best = _pick_best_part(pool, searched=searched, required_qty=required_qty)
 
             return _parse_mouser_part(
                 best,
@@ -223,6 +252,7 @@ class MouserClient:
             supplier=SUPPLIER_MOUSER,
             mpn=mpn,
             manufacturer="Mock Mfr",
+            matched_mpn=searched,
             supplier_part_number=f"MOCK-{searched[:12]}",
             product_url="https://example.com/mock/mouser",
             description=f"MOCK Mouser result for {searched}",

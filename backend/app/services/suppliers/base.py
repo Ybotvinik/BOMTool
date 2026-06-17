@@ -30,6 +30,7 @@ class SupplierPriceResult:
     supplier: str
     mpn: str
     manufacturer: str | None = None
+    matched_mpn: str | None = None
     supplier_part_number: str | None = None
     product_url: str | None = None
     description: str | None = None
@@ -49,13 +50,14 @@ def select_price_break(
     breaks: list[tuple[float, float]], required_qty: float
 ) -> tuple[float | None, float | None]:
     """Pick unit price for required quantity from (break_qty, unit_price) pairs."""
-    if not breaks or required_qty <= 0:
+    if not breaks:
         return None, None
     sorted_breaks = sorted(breaks, key=lambda x: x[0])
+    qty_for_breaks = required_qty if required_qty > 0 else sorted_breaks[-1][0]
     chosen_qty = sorted_breaks[0][0]
     chosen_price = sorted_breaks[0][1]
     for break_qty, unit_price in sorted_breaks:
-        if break_qty <= required_qty:
+        if break_qty <= qty_for_breaks:
             chosen_qty = break_qty
             chosen_price = unit_price
         else:
@@ -101,13 +103,17 @@ def supplier_result_to_dict(result: SupplierPriceResult, *, is_mock: bool = Fals
     return {
         "supplier": result.supplier,
         "mpn": result.mpn,
+        "matched_mpn": result.matched_mpn,
         "manufacturer": result.manufacturer,
+        "description": result.description,
         "supplier_part_number": result.supplier_part_number,
         "product_url": result.product_url,
         "currency": result.currency,
         "unit_price_for_required_qty": result.unit_price_for_required_qty,
         "price_break_qty": result.price_break_qty,
         "available_qty": result.available_qty,
+        "lead_time": result.lead_time,
+        "lifecycle_status": result.lifecycle_status,
         "match_status": result.match_status,
         "match_reason": result.match_reason,
         "is_exact_match": result.is_exact_match,

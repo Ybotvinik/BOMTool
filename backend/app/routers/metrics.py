@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,13 +11,19 @@ from app.models import (
     BomLine,
     BomVersion,
     Customer,
+    ExportReport,
+    OfficialPriceLine,
+    OfficialPriceSnapshot,
     PricingLine,
     PricingSnapshot,
     Project,
+    ProjectFile,
     SupplierQuote,
     SupplierQuoteLine,
 )
 from app.services.bom_quality import compute_quality_summary
+from app.services.project_build import effective_build_quantity
+from app.services.suppliers.workbench import get_workbench_results
 
 router = APIRouter(prefix="/projects", tags=["metrics"])
 
@@ -29,13 +37,31 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         "customer_id": project.customer_id,
         "customer_name": customer.name if customer else None,
         "status": project.status,
+        "description": project.description,
         "active_bom_version_id": project.active_version_id,
         "active_bom_version_name": None,
+        "active_bom_version_label": None,
+        "active_bom_is_active": None,
         "bom_total_lines": 0,
+        "bom_non_dnp_lines": 0,
+        "bom_dnp_count": 0,
+        "bom_ok_count": 0,
         "bom_quality_score": None,
         "bom_needs_review_count": 0,
         "bom_error_count": 0,
         "bom_warning_count": 0,
+        "official_selected_total": None,
+        "official_has_solution": 0,
+        "official_needs_approval": 0,
+        "official_no_solution": 0,
+        "official_dnp": 0,
+        "official_snapshot_id": None,
+        "official_snapshot_name": None,
+        "official_snapshot_total": None,
+        "official_snapshot_created_at": None,
+        "latest_customer_export_at": None,
+        "latest_procurement_export_at": None,
+        "project_files_count": 0,
         "latest_china_quote_id": None,
         "latest_china_quote_name": None,
         "latest_china_quote_matched_count": 0,
@@ -48,19 +74,25 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         "missing_price_count": 0,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
         "build_quantity": project.build_quantity,
+        "effective_build_quantity": project.build_quantity,
         "bom_revision_code": None,
         "bom_doc_number": None,
         "bom_board_name": None,
+        "bom_version_notes": None,
     }
 
-    # Active BOM version + quality.
+    version: BomVersion | None = None
     if project.active_version_id is not None:
         version = db.get(BomVersion, project.active_version_id)
         if version is not None:
             out["active_bom_version_name"] = version.version_name or version.version_label
+            out["active_bom_version_label"] = version.version_label
+            out["active_bom_is_active"] = version.is_active
             out["bom_revision_code"] = version.revision_code
             out["bom_doc_number"] = version.source_doc_number
             out["bom_board_name"] = version.board_name
+            out["bom_version_notes"] = version.notes
+            out["effective_build_quantity"] = effective_build_quantity(project, version)
             lines = list(
                 db.scalars(
                     select(BomLine).where(BomLine.bom_version_id == version.id)
@@ -68,12 +100,60 @@ def _compute_metrics(db: Session, project: Project) -> dict:
             )
             summary = compute_quality_summary(lines)
             out["bom_total_lines"] = summary["total_lines"]
+            out["bom_dnp_count"] = summary["dnp_count"]
+            out["bom_non_dnp_lines"] = max(0, summary["total_lines"] - summary["dnp_count"])
+            out["bom_ok_count"] = summary["ok_count"]
             out["bom_quality_score"] = summary["quality_score"] if lines else None
             out["bom_needs_review_count"] = summary["needs_review_count"]
             out["bom_error_count"] = summary["error_count"]
             out["bom_warning_count"] = summary["warning_count"]
 
-    # Latest China quote + match counts.
+            try:
+                wb = get_workbench_results(
+                    db, project_id=project.id, bom_version_id=version.id
+                )
+                ws = wb.get("summary") or {}
+                out["official_selected_total"] = ws.get("selected_total_cost")
+                out["official_has_solution"] = ws.get("has_solution", 0)
+                out["official_needs_approval"] = ws.get("needs_approval", 0)
+                out["official_no_solution"] = ws.get("no_solution", 0)
+                out["official_dnp"] = ws.get("dnp", 0)
+                wb_lines = wb.get("lines") or []
+                out["official_priced_lines"] = sum(
+                    1 for ln in wb_lines if ln.get("unit_price") is not None
+                )
+                out["official_no_stock_count"] = sum(
+                    1 for ln in wb_lines if ln.get("status") == "No Stock"
+                )
+                out["official_missing_prices"] = ws.get("no_solution", 0)
+            except Exception:  # noqa: BLE001
+                pass
+
+            official_snap = db.scalar(
+                select(OfficialPriceSnapshot)
+                .where(
+                    OfficialPriceSnapshot.project_id == project.id,
+                    OfficialPriceSnapshot.bom_version_id == version.id,
+                )
+                .order_by(desc(OfficialPriceSnapshot.created_at))
+            )
+            if official_snap is not None:
+                out["official_snapshot_id"] = official_snap.id
+                out["official_snapshot_name"] = official_snap.snapshot_name
+                out["official_snapshot_created_at"] = (
+                    official_snap.created_at.isoformat() if official_snap.created_at else None
+                )
+                snap_lines = list(
+                    db.scalars(
+                        select(OfficialPriceLine).where(
+                            OfficialPriceLine.snapshot_id == official_snap.id
+                        )
+                    )
+                )
+                out["official_snapshot_total"] = float(
+                    sum(float(l.official_extended_price or 0) for l in snap_lines)
+                )
+
     quote = db.scalar(
         select(SupplierQuote)
         .where(
@@ -102,7 +182,6 @@ def _compute_metrics(db: Session, project: Project) -> dict:
             1 for l in q_lines if l.match_status == "not_matched"
         )
 
-    # Latest pricing snapshot + totals.
     snap = db.scalar(
         select(PricingSnapshot)
         .where(PricingSnapshot.project_id == project.id)
@@ -114,9 +193,7 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         out["latest_internal_cost_currency"] = snap.currency
         p_lines = list(
             db.scalars(
-                select(PricingLine).where(
-                    PricingLine.pricing_snapshot_id == snap.id
-                )
+                select(PricingLine).where(PricingLine.pricing_snapshot_id == snap.id)
             )
         )
         out["latest_internal_cost"] = float(
@@ -125,6 +202,36 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         out["missing_price_count"] = sum(
             1 for l in p_lines if l.pricing_status == "missing_price"
         )
+
+    customer_export = db.scalar(
+        select(ExportReport)
+        .where(
+            ExportReport.project_id == project.id,
+            ExportReport.is_customer_safe.is_(True),
+        )
+        .order_by(desc(ExportReport.created_at))
+    )
+    if customer_export and customer_export.created_at:
+        out["latest_customer_export_at"] = customer_export.created_at.isoformat()
+
+    proc_export = db.scalar(
+        select(ExportReport)
+        .where(
+            ExportReport.project_id == project.id,
+            ExportReport.report_type.ilike("%procurement%"),
+        )
+        .order_by(desc(ExportReport.created_at))
+    )
+    if proc_export and proc_export.created_at:
+        out["latest_procurement_export_at"] = proc_export.created_at.isoformat()
+
+    files_count = db.scalar(
+        select(func.count())
+        .select_from(ProjectFile)
+        .where(ProjectFile.project_id == project.id)
+    )
+    out["project_files_count"] = int(files_count or 0)
+
     return out
 
 

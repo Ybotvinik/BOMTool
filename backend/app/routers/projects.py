@@ -7,10 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user_id
-from app.models import ActivityLog, Customer, Project
+from app.models import ActivityLog, BomVersion, Customer, Project
 from app.schemas.activity_log import ActivityLogRead
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
 from app.services.activity import log_activity
+from app.services.project_build import refresh_active_bom_quantities
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -139,17 +140,34 @@ def update_project(
         project.status = data["status"]
 
     # --- Build quantity ---
-    if "build_quantity" in data and data["build_quantity"] is not None:
-        if data["build_quantity"] != project.build_quantity:
+    build_qty_changed = False
+    if "build_quantity" in data:
+        bq = data["build_quantity"]
+        if bq is None or bq <= 0:
+            raise HTTPException(
+                status_code=400, detail="כמות להרכבה חייבת להיות מספר חיובי"
+            )
+        if bq != project.build_quantity:
             changes.append("build quantity changed")
-        project.build_quantity = data["build_quantity"]
+            build_qty_changed = True
+        project.build_quantity = bq
 
     # --- Description / notes ---
     if "description" in data:
         project.description = data["description"]
 
     if "active_version_id" in data:
-        project.active_version_id = data["active_version_id"]
+        new_vid = data["active_version_id"]
+        if new_vid is not None:
+            version = db.get(BomVersion, new_vid)
+            if version is None or version.project_id != project.id:
+                raise HTTPException(status_code=400, detail="גרסת BOM לא תקינה לפרויקט")
+        if new_vid != project.active_version_id:
+            changes.append("active BOM version changed")
+        project.active_version_id = new_vid
+
+    if build_qty_changed:
+        refresh_active_bom_quantities(db, project)
 
     db.commit()
     db.refresh(project)

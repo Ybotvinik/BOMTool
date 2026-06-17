@@ -9,7 +9,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BomLine, BomVersion
+from app.models import BomLine, BomLineOverride, BomVersion
 
 STATUS_OK = "ok"
 STATUS_WARNING = "warning"
@@ -58,6 +58,31 @@ class QualityContext:
     refdes_counts: dict[str, int] = field(default_factory=dict)
 
 
+@dataclass
+class LineQualityInput:
+    mpn: str | None
+    manufacturer: str | None
+    description: str | None
+    quantity: Decimal | None
+    dnp: bool
+    cleaned_mpn: str | None
+    reference_designators: str | None
+
+
+def build_context_from_inputs(lines: list[LineQualityInput]) -> QualityContext:
+    ctx = QualityContext()
+    for ln in lines:
+        cm = ln.cleaned_mpn or clean_mpn(ln.mpn)
+        if cm:
+            ctx.mpn_counts[cm] = ctx.mpn_counts.get(cm, 0) + 1
+            ctx.mpn_variants.setdefault(cm, set()).add(
+                ((ln.manufacturer or "").strip().upper(), (ln.description or "").strip().upper())
+            )
+        for rd in parse_refdes(ln.reference_designators):
+            ctx.refdes_counts[rd] = ctx.refdes_counts.get(rd, 0) + 1
+    return ctx
+
+
 def build_context(lines: list[BomLine]) -> QualityContext:
     ctx = QualityContext()
     for ln in lines:
@@ -72,21 +97,21 @@ def build_context(lines: list[BomLine]) -> QualityContext:
     return ctx
 
 
-def analyze_bom_line_quality(line: BomLine, ctx: QualityContext) -> tuple[bool, str, list[str]]:
-    """Return (needs_review, quality_status, reasons)."""
+def analyze_line_quality_input(inp: LineQualityInput, ctx: QualityContext) -> tuple[bool, str, list[str]]:
+    """Return (needs_review, quality_status, reasons) for effective line values."""
     errors: list[str] = []
     warnings: list[str] = []
 
-    cleaned = line.cleaned_mpn or clean_mpn(line.mpn)
-    original = (line.mpn or "").strip()
+    cleaned = inp.cleaned_mpn or clean_mpn(inp.mpn)
+    original = (inp.mpn or "").strip()
     if not cleaned and not original:
         errors.append("Missing MPN")
-    if not (line.manufacturer or "").strip():
+    if not (inp.manufacturer or "").strip():
         warnings.append("Missing Manufacturer")
-    if not (line.description or "").strip():
+    if not (inp.description or "").strip():
         warnings.append("Missing Description")
 
-    qty = line.quantity
+    qty = inp.quantity
     qty_missing = qty is None
     try:
         qty_val = Decimal(str(qty)) if qty is not None else None
@@ -95,10 +120,10 @@ def analyze_bom_line_quality(line: BomLine, ctx: QualityContext) -> tuple[bool, 
         qty_missing = True
     if qty_missing or qty_val is None:
         errors.append("Missing Qty")
-    elif qty_val == 0 and not line.dnp:
+    elif qty_val == 0 and not inp.dnp:
         warnings.append("Zero Qty")
 
-    if line.dnp:
+    if inp.dnp:
         warnings.append("DNP")
 
     if cleaned and len(cleaned) < 3:
@@ -109,7 +134,7 @@ def analyze_bom_line_quality(line: BomLine, ctx: QualityContext) -> tuple[bool, 
         if ctx.mpn_counts.get(cleaned, 0) > 1 and len(variants) > 1:
             warnings.append("Duplicate MPN with different data")
 
-    for rd in parse_refdes(line.reference_designators):
+    for rd in parse_refdes(inp.reference_designators):
         if ctx.refdes_counts.get(rd, 0) > 1:
             warnings.append("Duplicate RefDes")
             break
@@ -121,13 +146,28 @@ def analyze_bom_line_quality(line: BomLine, ctx: QualityContext) -> tuple[bool, 
         status = STATUS_WARNING
     else:
         status = STATUS_OK
-    # DNP-only warning still flags review, per spec (review_reason includes DNP).
     needs_review = bool(errors) or bool(warnings)
     return needs_review, status, reasons
 
 
+def analyze_bom_line_quality(line: BomLine, ctx: QualityContext) -> tuple[bool, str, list[str]]:
+    """Return (needs_review, quality_status, reasons)."""
+    inp = LineQualityInput(
+        mpn=line.mpn,
+        manufacturer=line.manufacturer,
+        description=line.description,
+        quantity=Decimal(str(line.quantity)) if line.quantity is not None else None,
+        dnp=line.dnp,
+        cleaned_mpn=line.cleaned_mpn or clean_mpn(line.mpn),
+        reference_designators=line.reference_designators,
+    )
+    return analyze_line_quality_input(inp, ctx)
+
+
 def reanalyze_bom_version_quality(db: Session, bom_version_id: int) -> list[BomLine]:
-    """Recompute cleaned_mpn/required_qty + quality for all lines in a version."""
+    """Recompute quality for all lines using effective values (original + overrides)."""
+    from app.services.bom_line_override import effective_values, has_correction, overrides_for_version
+
     version = db.get(BomVersion, bom_version_id)
     build_qty = version.build_quantity if version else None
     lines = list(
@@ -135,15 +175,37 @@ def reanalyze_bom_version_quality(db: Session, bom_version_id: int) -> list[BomL
             select(BomLine).where(BomLine.bom_version_id == bom_version_id)
         )
     )
-    # Make sure cleaned_mpn / required_qty are current before building context.
-    for ln in lines:
-        if not ln.cleaned_mpn:
-            ln.cleaned_mpn = clean_mpn(ln.mpn)
-        ln.required_qty = compute_required_qty(ln.quantity, build_qty, ln.dnp)
+    overrides = overrides_for_version(db, bom_version_id)
 
-    ctx = build_context(lines)
+    inputs: list[LineQualityInput] = []
     for ln in lines:
-        needs_review, status, reasons = analyze_bom_line_quality(ln, ctx)
+        eff = effective_values(ln, overrides.get(ln.id))
+        qty = eff["quantity"]
+        qty_dec = Decimal(str(qty)) if qty is not None else None
+        inputs.append(
+            LineQualityInput(
+                mpn=eff["mpn"],
+                manufacturer=eff["manufacturer"],
+                description=eff["description"],
+                quantity=qty_dec,
+                dnp=eff["dnp"],
+                cleaned_mpn=eff["cleaned_mpn"],
+                reference_designators=ln.reference_designators,
+            )
+        )
+
+    ctx = build_context_from_inputs(inputs)
+    for ln, inp, eff in zip(lines, inputs, [effective_values(l, overrides.get(l.id)) for l in lines]):
+        needs_review, status, reasons = analyze_line_quality_input(inp, ctx)
+        ov = overrides.get(ln.id)
+        if ov and ov.quality_reviewed and status != STATUS_ERROR and not has_correction(ov):
+            needs_review = False
+        ln.cleaned_mpn = eff["cleaned_mpn"]
+        ln.required_qty = compute_required_qty(
+            Decimal(str(eff["quantity"])) if eff["quantity"] is not None else None,
+            build_qty,
+            eff["dnp"],
+        )
         ln.needs_review = needs_review
         ln.quality_status = status
         ln.review_reason = "; ".join(reasons) if reasons else None
@@ -209,7 +271,7 @@ def compute_quality_summary(lines: list[BomLine]) -> dict:
 
 
 def line_to_quality_dict(line: BomLine) -> dict:
-    """Serialize a BOM line using the quality API field names."""
+    """Serialize a BOM line (legacy — prefer bom_line_override.line_to_quality_dict)."""
     return {
         "line_id": line.id,
         "line_number": line.line_no,

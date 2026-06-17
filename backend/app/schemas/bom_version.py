@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel
 
@@ -21,6 +21,11 @@ class BomVersionCreate(BomVersionBase):
 
 class BomVersionUpdate(BaseModel):
     version_label: str | None = None
+    version_name: str | None = None
+    revision_code: str | None = None
+    source_doc_number: str | None = None
+    board_name: str | None = None
+    build_quantity: int | None = Field(default=None, gt=0)
     status: str | None = None
     source: str | None = None
     notes: str | None = None

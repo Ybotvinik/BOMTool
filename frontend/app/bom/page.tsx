@@ -3,76 +3,27 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { RefreshCw, Upload, Loader2, AlertTriangle, Inbox, Pencil, Check, Search } from "lucide-react";
-import { Card, PageHeader, Kpi, Badge } from "@/components/ui";
+import { RefreshCw, Upload, Loader2, AlertTriangle, Inbox, Search } from "lucide-react";
+import { Card, PageHeader } from "@/components/ui";
 import { PageTabs } from "@/components/PageTabs";
+import { BomContextHeader } from "@/components/bom/BomContextHeader";
 import { BomQualityPanel } from "@/components/bom/BomQualityPanel";
 import { BomIssuesPanel } from "@/components/bom/BomIssuesPanel";
-import { API_URL, apiGet, apiPost } from "@/lib/api";
-import { useCurrentUser } from "@/lib/current-user";
+import { BomLinesTable } from "@/components/bom/BomLinesTable";
+import {
+  BOM_FILTERS,
+  matchesBomFilter,
+  type BomFilterKey,
+  type BomProjectMeta,
+  type BomSummary,
+  type BomVersionMeta,
+} from "@/components/bom/types";
+import { apiGet } from "@/lib/api";
 import { EditBomLineModal, type QualityLine } from "@/components/EditBomLineModal";
+import { ReviewBomLineModal } from "@/components/bom/ReviewBomLineModal";
 
-type ApiVersion = {
-  id: number;
-  project_id: number;
-  version_label: string;
-  version_name: string | null;
-  revision_code: string | null;
-  source_doc_number: string | null;
-  board_name: string | null;
-  source_file_name: string | null;
-  revised_date: string | null;
-  build_quantity: number | null;
-  status: string;
-  is_active: boolean;
-};
-type ApiProject = { id: number; name: string; code: string; customer_id: number; active_version_id: number | null };
 type ApiCustomer = { id: number; name: string };
-type ApiLine = Record<string, unknown>;
-type Summary = Record<string, number>;
 type Status = "idle" | "loading" | "ok" | "empty" | "error" | "pick-project" | "no-bom";
-
-const s = (v: unknown) => (v == null ? "" : String(v));
-const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v));
-
-function toQuality(l: ApiLine): QualityLine {
-  return {
-    line_id: Number(l.id),
-    line_number: l.line_no == null ? null : Number(l.line_no),
-    original_mpn: (l.mpn as string) ?? null,
-    cleaned_mpn: (l.cleaned_mpn as string) ?? null,
-    manufacturer: (l.manufacturer as string) ?? null,
-    original_description: (l.description as string) ?? null,
-    qty_per_assembly: l.quantity == null ? null : Number(l.quantity),
-    required_qty: l.required_qty == null ? null : Number(l.required_qty),
-    reference_designators: (l.reference_designators as string) ?? null,
-    footprint: (l.footprint as string) ?? null,
-    value_text: (l.value as string) ?? null,
-    is_dnp: l.dnp === true,
-    quality_status: (l.quality_status as string) ?? "ok",
-    needs_review: l.needs_review === true,
-    review_reason: (l.review_reason as string) ?? null,
-    notes: (l.notes as string) ?? null,
-  };
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === "error")
-    return <Badge className="bg-red-50 text-risk-critical border-red-200">Error</Badge>;
-  if (status === "warning")
-    return <Badge className="bg-amber-50 text-amber-700 border-amber-200">Warning</Badge>;
-  return <Badge className="bg-green-50 text-risk-low border-green-200">OK</Badge>;
-}
-
-const FILTERS = [
-  ["all", "הכל"],
-  ["error", "Errors"],
-  ["warning", "Warnings"],
-  ["needs_review", "Needs Review"],
-  ["dnp", "DNP"],
-  ["missing_mpn", "Missing MPN"],
-  ["missing_qty", "Missing Qty"],
-] as const;
 
 const BOM_TABS = [
   { id: "lines", label: "שורות BOM" },
@@ -82,37 +33,48 @@ const BOM_TABS = [
 
 type BomTab = (typeof BOM_TABS)[number]["id"];
 
+function versionSelectLabel(v: BomVersionMeta): string {
+  const name = v.version_name ?? v.version_label;
+  const rev = v.revision_code ? ` · ${v.revision_code}` : "";
+  const active = v.is_active ? " ★" : "";
+  return `${name}${rev}${active}`;
+}
+
 function BomInner() {
   const router = useRouter();
   const params = useSearchParams();
   const urlProjectId = params.get("project_id");
   const urlVersionId = params.get("version_id");
   const activeTab = (params.get("tab") as BomTab) || "lines";
-  const { user } = useCurrentUser();
+  const urlFilter = params.get("filter") as BomFilterKey | null;
 
-  const [pickerProjects, setPickerProjects] = useState<ApiProject[]>([]);
-  const [versions, setVersions] = useState<ApiVersion[]>([]);
+  const [pickerProjects, setPickerProjects] = useState<BomProjectMeta[]>([]);
+  const [versions, setVersions] = useState<BomVersionMeta[]>([]);
   const [versionId, setVersionId] = useState<number | null>(urlVersionId ? Number(urlVersionId) : null);
-  const [version, setVersion] = useState<ApiVersion | null>(null);
-  const [project, setProject] = useState<ApiProject | null>(null);
+  const [version, setVersion] = useState<BomVersionMeta | null>(null);
+  const [project, setProject] = useState<BomProjectMeta | null>(null);
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
-  const [lines, setLines] = useState<ApiLine[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [lines, setLines] = useState<QualityLine[]>([]);
+  const [summary, setSummary] = useState<BomSummary | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
-  const [lastUrl, setLastUrl] = useState("");
-  const [filter, setFilter] = useState<string>("all");
+  const [filter, setFilter] = useState<BomFilterKey>(urlFilter ?? "all");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<QualityLine | null>(null);
+  const [reviewing, setReviewing] = useState<QualityLine | null>(null);
+
+  useEffect(() => {
+    if (urlFilter && BOM_FILTERS.some(([k]) => k === urlFilter)) {
+      setFilter(urlFilter);
+    }
+  }, [urlFilter]);
 
   const loadLines = useCallback(async (id: number) => {
-    const path = `/api/bom-versions/${id}/lines`;
-    setLastUrl(`${API_URL}${path}`);
     setStatus("loading");
     try {
       const [data, sum] = await Promise.all([
-        apiGet<ApiLine[]>(path),
-        apiGet<Summary>(`/api/bom-versions/${id}/quality-summary`),
+        apiGet<QualityLine[]>(`/api/bom-versions/${id}/quality-lines`),
+        apiGet<BomSummary & { bom_version_id?: number }>(`/api/bom-versions/${id}/quality-summary`),
       ]);
       setLines(data);
       setSummary(sum);
@@ -123,12 +85,26 @@ function BomInner() {
     }
   }, []);
 
+  function applyLineSaved(updated: QualityLine, newSummary: Record<string, unknown> | null) {
+    setLines((prev) => prev.map((l) => (l.line_id === updated.line_id ? updated : l)));
+    if (newSummary) {
+      setSummary(newSummary as BomSummary);
+    }
+  }
+
+  function handleLineSaved(updated: QualityLine, newSummary: Record<string, unknown> | null) {
+    applyLineSaved(updated, newSummary);
+    setEditing(null);
+    setReviewing(null);
+    if (versionId != null) loadLines(versionId);
+  }
+
   const loadMeta = useCallback(async (id: number) => {
     try {
-      const v = await apiGet<ApiVersion>(`/api/bom-versions/${id}`);
+      const v = await apiGet<BomVersionMeta>(`/api/bom-versions/${id}`);
       setVersion(v);
       const [p, cs] = await Promise.all([
-        apiGet<ApiProject>(`/api/projects/${v.project_id}`),
+        apiGet<BomProjectMeta>(`/api/projects/${v.project_id}`),
         apiGet<ApiCustomer[]>("/api/customers"),
       ]);
       setProject(p);
@@ -141,9 +117,9 @@ function BomInner() {
   useEffect(() => {
     (async () => {
       setStatus("loading");
-      let vs: ApiVersion[] = [];
+      let vs: BomVersionMeta[] = [];
       try {
-        vs = await apiGet<ApiVersion[]>("/api/bom-versions");
+        vs = await apiGet<BomVersionMeta[]>("/api/bom-versions");
         setVersions(vs);
       } catch {
         /* ignore */
@@ -152,7 +128,7 @@ function BomInner() {
       if (!urlProjectId && !urlVersionId) {
         try {
           const [ps, cs] = await Promise.all([
-            apiGet<ApiProject[]>("/api/projects"),
+            apiGet<BomProjectMeta[]>("/api/projects"),
             apiGet<ApiCustomer[]>("/api/customers"),
           ]);
           setPickerProjects(ps);
@@ -173,7 +149,7 @@ function BomInner() {
           return;
         }
         try {
-          const p = await apiGet<ApiProject>(`/api/projects/${pid}`);
+          const p = await apiGet<BomProjectMeta>(`/api/projects/${pid}`);
           setProject(p);
           const cs = await apiGet<ApiCustomer[]>("/api/customers");
           setCustomers(cs);
@@ -205,15 +181,22 @@ function BomInner() {
     setFilter("all");
     loadMeta(id);
     loadLines(id);
+    const q = new URLSearchParams(params.toString());
+    q.set("version_id", String(id));
+    if (project?.id) q.set("project_id", String(project.id));
+    if (activeTab !== "lines") q.set("tab", activeTab);
+    else q.delete("tab");
+    q.delete("filter");
+    router.replace(`/bom?${q.toString()}`);
   }
 
-  async function markReviewed(lineId: number) {
-    try {
-      await apiPost(`/api/bom-lines/${lineId}/mark-reviewed`, {}, user.id);
-      if (versionId) loadLines(versionId);
-    } catch (e) {
-      alert(String(e).replace(/^Error:\s*/, ""));
-    }
+  function navigateToFilter(next: BomFilterKey) {
+    setFilter(next);
+    const q = new URLSearchParams(params.toString());
+    q.set("tab", "lines");
+    if (next !== "all") q.set("filter", next);
+    else q.delete("filter");
+    router.push(`/bom?${q.toString()}`);
   }
 
   const customerName = project ? customers.find((c) => c.id === project.customer_id)?.name : null;
@@ -226,15 +209,10 @@ function BomInner() {
     ? versions.filter((v) => v.project_id === scopedProjectId)
     : versions;
 
-  const rows = lines.map(toQuality);
+  const rows = lines;
   const q = query.trim().toLowerCase();
   const filtered = rows.filter((r) => {
-    if (filter === "error" && r.quality_status !== "error") return false;
-    if (filter === "warning" && r.quality_status !== "warning") return false;
-    if (filter === "needs_review" && !r.needs_review) return false;
-    if (filter === "dnp" && !r.is_dnp) return false;
-    if (filter === "missing_mpn" && (r.review_reason ?? "").indexOf("Missing MPN") < 0) return false;
-    if (filter === "missing_qty" && (r.review_reason ?? "").indexOf("Missing Qty") < 0) return false;
+    if (!matchesBomFilter(r, filter)) return false;
     if (q) {
       const hay = [r.original_mpn, r.cleaned_mpn, r.manufacturer, r.original_description, r.reference_designators]
         .map((x) => (x ?? "").toLowerCase())
@@ -249,6 +227,8 @@ function BomInner() {
     version_id: versionId,
   };
 
+  const showContext = Boolean(project || version) && status !== "pick-project" && status !== "no-bom";
+
   return (
     <>
       <PageHeader
@@ -260,19 +240,24 @@ function BomInner() {
               <select
                 value={versionId ?? ""}
                 onChange={(e) => selectVersion(Number(e.target.value))}
-                className="h-8 rounded-md border border-slate-200 px-2 text-[12px] bg-white"
+                className="h-8 min-w-[160px] rounded-md border border-slate-200 px-2 text-[12px] bg-white font-medium"
+                title="גרסת BOM נבחרת"
               >
-                <option value="" disabled>בחר גרסה</option>
+                <option value="" disabled>
+                  בחר גרסה
+                </option>
                 {projectVersions.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.version_name ?? v.version_label} (#{v.id}){v.is_active ? " ★" : ""}
+                    {versionSelectLabel(v)} (#{v.id})
                   </option>
                 ))}
               </select>
             )}
             <button
+              type="button"
               onClick={() => versionId != null && loadLines(versionId)}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50"
+              disabled={versionId == null || status === "loading"}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50 disabled:opacity-50"
             >
               <RefreshCw className="h-3.5 w-3.5" /> רענון
             </button>
@@ -288,28 +273,14 @@ function BomInner() {
 
       <PageTabs tabs={[...BOM_TABS]} activeTab={activeTab} basePath="/bom" query={tabQuery} />
 
-      {/* Project / version identity */}
-      {(project || version) && activeTab === "lines" && (
-        <Card className="p-3 mb-3">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-1.5 text-[11.5px]">
-            <Meta label="לקוח" value={customerName} />
-            <Meta label="פרויקט" value={project?.name} />
-            <Meta label="קוד פרויקט" value={project?.code} />
-            <Meta label="BOM Version" value={version ? (version.version_name ?? version.version_label) : null} />
-            {process.env.NODE_ENV === "development" && version && (
-              <Meta label="Version ID" value={String(version.id)} />
-            )}
-            {version && (
-              <>
-                <Meta label="Revision" value={version.revision_code} />
-                <Meta label="Doc Number" value={version.source_doc_number} />
-                <Meta label="Board Name" value={version.board_name} />
-                <Meta label="Source File" value={version.source_file_name} />
-                <Meta label="Build Quantity" value={version.build_quantity?.toString()} />
-              </>
-            )}
-          </div>
-        </Card>
+      {showContext && (
+        <BomContextHeader
+          project={project}
+          customerName={customerName ?? null}
+          version={version}
+          summary={summary}
+          loading={status === "loading"}
+        />
       )}
 
       {status === "pick-project" && (
@@ -320,10 +291,10 @@ function BomInner() {
             onChange={(e) => {
               const v = e.target.value;
               if (v) {
-                const params = new URLSearchParams();
-                params.set("project_id", v);
-                if (activeTab !== "lines") params.set("tab", activeTab);
-                router.push(`/bom?${params.toString()}`);
+                const p = new URLSearchParams();
+                p.set("project_id", v);
+                if (activeTab !== "lines") p.set("tab", activeTab);
+                router.push(`/bom?${p.toString()}`);
               }
             }}
             className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
@@ -338,155 +309,133 @@ function BomInner() {
         </Card>
       )}
 
-      {activeTab === "quality" && <BomQualityPanel versionId={versionId} />}
+      {activeTab === "quality" && (
+        <BomQualityPanel
+          versionId={versionId}
+          summary={summary}
+          rows={rows}
+          loading={status === "loading"}
+          tabQuery={tabQuery}
+          onReload={() => versionId != null && loadLines(versionId)}
+          onFilterNavigate={navigateToFilter}
+          onEdit={setEditing}
+          onReview={setReviewing}
+        />
+      )}
 
       {activeTab === "issues" && (
-        <BomIssuesPanel versionId={versionId} tabQuery={tabQuery} />
+        <BomIssuesPanel
+          versionId={versionId}
+          tabQuery={tabQuery}
+          summary={summary}
+          onEdit={setEditing}
+          onReview={setReviewing}
+        />
       )}
 
       {activeTab === "lines" && (
-      <>
-      {/* Quality cards — only when a version is loaded */}
-      {(status === "ok" || status === "empty") && (
-      <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
-        <Kpi label="Total Lines" value={summary?.total_lines ?? rows.length} />
-        <Kpi label="Quality Score" value={summary?.quality_score ?? "—"} tone={(summary?.quality_score ?? 100) >= 90 ? "good" : (summary?.quality_score ?? 0) >= 70 ? "warn" : "bad"} />
-        <Kpi label="Errors" value={summary?.error_count ?? 0} tone="bad" />
-        <Kpi label="Warnings" value={summary?.warning_count ?? 0} tone="warn" />
-        <Kpi label="Needs Review" value={summary?.needs_review_count ?? 0} tone="warn" />
-        <Kpi label="DNP" value={summary?.dnp_count ?? 0} />
-      </div>
+        <>
+          {(status === "ok" || status === "empty") && summary && (
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              {BOM_FILTERS.map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  className={
+                    "h-7 px-2.5 rounded-md text-[11.5px] border " +
+                    (filter === key
+                      ? "bg-brand text-brand-fg border-brand"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50")
+                  }
+                >
+                  {label}
+                  {key !== "all" && summary && (
+                    <span className="ms-1 opacity-70 tabular-nums">
+                      (
+                      {key === "ok"
+                        ? summary.ok_count ?? 0
+                        : key === "error"
+                          ? summary.error_count ?? 0
+                          : key === "warning"
+                            ? summary.warning_count ?? 0
+                            : key === "needs_review"
+                              ? summary.needs_review_count ?? 0
+                              : key === "dnp"
+                                ? summary.dnp_count ?? 0
+                                : key === "missing_mpn"
+                                  ? summary.missing_mpn_count ?? 0
+                                  : key === "missing_qty"
+                                    ? summary.missing_qty_count ?? 0
+                                    : 0}
+                      )
+                    </span>
+                  )}
+                </button>
+              ))}
+              <div className="relative ms-auto">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute top-1/2 -translate-y-1/2 start-2" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="חיפוש MPN / יצרן / תיאור / RefDes"
+                  className="h-8 w-64 rounded-md border border-slate-200 ps-7 pe-2 text-[12px]"
+                />
+              </div>
+            </div>
+          )}
+
+          <Card className="overflow-hidden">
+            {status === "loading" ? (
+              <div className="py-12 flex items-center justify-center gap-2 text-slate-500 text-[13px]">
+                <Loader2 className="h-4 w-4 animate-spin" /> טוען שורות BOM...
+              </div>
+            ) : status === "pick-project" ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
+                <Inbox className="h-7 w-7" /> בחר פרויקט
+              </div>
+            ) : status === "no-bom" ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
+                <Inbox className="h-7 w-7" /> לא נטען BOM לפרויקט זה עדיין
+              </div>
+            ) : status === "error" ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2 text-red-600 text-[13px]">
+                <AlertTriangle className="h-7 w-7" /> טעינת שורות ה-BOM נכשלה
+                <span className="text-[11px] text-red-500 font-mono">{errorMsg}</span>
+              </div>
+            ) : status === "empty" ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
+                <Inbox className="h-7 w-7" /> לא נמצאו שורות BOM עבור גרסה זו.
+              </div>
+            ) : (
+              <div className="max-h-[calc(100vh-14rem)] overflow-auto">
+                <BomLinesTable
+                  rows={filtered}
+                  onEdit={setEditing}
+                  onReview={setReviewing}
+                />
+              </div>
+            )}
+          </Card>
+        </>
       )}
 
-      {/* Filters + search */}
-      {(status === "ok" || status === "empty") && (
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        {FILTERS.map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
-            className={
-              "h-7 px-2.5 rounded-md text-[11.5px] border " +
-              (filter === key ? "bg-brand text-brand-fg border-brand" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50")
-            }
-          >
-            {label}
-          </button>
-        ))}
-        <div className="relative ms-auto">
-          <Search className="h-3.5 w-3.5 text-slate-400 absolute top-1/2 -translate-y-1/2 start-2" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="חיפוש MPN / יצרן / תיאור / RefDes"
-            className="h-8 w-64 rounded-md border border-slate-200 ps-7 pe-2 text-[12px]"
-          />
-        </div>
-      </div>
-      )}
-
-      <Card className="overflow-hidden">
-        {status === "loading" ? (
-          <div className="py-12 flex items-center justify-center gap-2 text-slate-500 text-[13px]">
-            <Loader2 className="h-4 w-4 animate-spin" /> טוען שורות BOM...
-          </div>
-        ) : status === "pick-project" ? (
-          <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
-            <Inbox className="h-7 w-7" /> בחר פרויקט
-          </div>
-        ) : status === "no-bom" ? (
-          <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
-            <Inbox className="h-7 w-7" /> לא נטען BOM לפרויקט זה עדיין
-          </div>
-        ) : status === "error" ? (
-          <div className="py-12 flex flex-col items-center justify-center gap-2 text-red-600 text-[13px]">
-            <AlertTriangle className="h-7 w-7" /> טעינת שורות ה-BOM נכשלה
-            <span className="text-[11px] text-red-500 font-mono">{errorMsg}</span>
-          </div>
-        ) : status === "empty" ? (
-          <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
-            <Inbox className="h-7 w-7" /> לא נמצאו שורות BOM עבור גרסה זו.
-          </div>
-        ) : (
-          <div className="overflow-auto">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="bg-slate-50 text-slate-500 text-right">
-                  <th className="px-2 py-2 font-medium">#</th>
-                  <th className="px-2 py-2 font-medium">Status</th>
-                  <th className="px-2 py-2 font-medium">Original MPN</th>
-                  <th className="px-2 py-2 font-medium">Cleaned MPN</th>
-                  <th className="px-2 py-2 font-medium">Manufacturer</th>
-                  <th className="px-2 py-2 font-medium">Description</th>
-                  <th className="px-2 py-2 font-medium text-center">Qty</th>
-                  <th className="px-2 py-2 font-medium text-center">Req Qty</th>
-                  <th className="px-2 py-2 font-medium">RefDes</th>
-                  <th className="px-2 py-2 font-medium">Footprint</th>
-                  <th className="px-2 py-2 font-medium text-center">DNP</th>
-                  <th className="px-2 py-2 font-medium">Review Reason</th>
-                  <th className="px-2 py-2 font-medium text-center">פעולות</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.line_id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                    <td className="px-2 py-1.5 text-slate-400 tabular-nums">{r.line_number}</td>
-                    <td className="px-2 py-1.5"><StatusBadge status={r.quality_status} /></td>
-                    <td className="px-2 py-1.5 font-medium tabular-nums">{r.original_mpn || "—"}</td>
-                    <td className="px-2 py-1.5 tabular-nums text-slate-500">{r.cleaned_mpn || "—"}</td>
-                    <td className="px-2 py-1.5">{r.manufacturer || "—"}</td>
-                    <td className="px-2 py-1.5 text-slate-600 max-w-[220px] truncate">{r.original_description || "—"}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">{r.qty_per_assembly ?? "—"}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums">{r.required_qty ?? "—"}</td>
-                    <td className="px-2 py-1.5 text-slate-600 max-w-[140px] truncate">{r.reference_designators || "—"}</td>
-                    <td className="px-2 py-1.5 text-slate-600">{r.footprint || "—"}</td>
-                    <td className="px-2 py-1.5 text-center">{r.is_dnp ? <Badge className="bg-slate-100 text-slate-600 border-slate-200">DNP</Badge> : <span className="text-slate-300">—</span>}</td>
-                    <td className="px-2 py-1.5 text-[11px] text-amber-700 max-w-[200px] truncate" title={r.review_reason ?? ""}>{r.review_reason || "—"}</td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center justify-center gap-1">
-                        <button onClick={() => setEditing(r)} title="עריכה" className="h-7 w-7 rounded-md hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-brand">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        {r.needs_review && r.quality_status !== "error" && (
-                          <button onClick={() => markReviewed(r.line_id)} title="סמן כנבדק" className="h-7 w-7 rounded-md hover:bg-green-50 flex items-center justify-center text-slate-500 hover:text-risk-low">
-                            <Check className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
-                  <tr><td colSpan={13} className="px-3 py-8 text-center text-slate-400">אין שורות התואמות לסינון.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {editing && activeTab === "lines" && (
+      {editing && (
         <EditBomLineModal
           line={editing}
           onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            if (versionId) loadLines(versionId);
-          }}
+          onSaved={handleLineSaved}
         />
       )}
-      </>
+
+      {reviewing && (
+        <ReviewBomLineModal
+          line={reviewing}
+          onClose={() => setReviewing(null)}
+          onSaved={handleLineSaved}
+        />
       )}
     </>
-  );
-}
-
-function Meta({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div>
-      <span className="text-slate-500">{label}: </span>
-      <span className="font-medium">{value || "—"}</span>
-    </div>
   );
 }
 

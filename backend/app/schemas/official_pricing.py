@@ -25,13 +25,17 @@ class SupplierTestRequest(BaseModel):
 class SupplierTestResponse(BaseModel):
     supplier: str
     mpn: str
+    matched_mpn: str | None = None
     manufacturer: str | None = None
+    description: str | None = None
     supplier_part_number: str | None = None
     product_url: str | None = None
     currency: str = "USD"
     unit_price_for_required_qty: float | None = None
     price_break_qty: float | None = None
     available_qty: float | None = None
+    lead_time: str | None = None
+    lifecycle_status: str | None = None
     match_status: str
     match_reason: str | None = None
     is_exact_match: bool = False

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel
 
@@ -30,7 +30,7 @@ class ProjectUpdate(BaseModel):
     new_customer: NewCustomer | None = None
     name: str | None = None
     code: str | None = None
-    build_quantity: int | None = None
+    build_quantity: int | None = Field(default=None, gt=0)
     status: str | None = None
     description: str | None = None
     active_version_id: int | None = None
