@@ -14,6 +14,12 @@ from app.models.pricing import PricingSnapshot, PricingLine
 from app.models.export_report import ExportReport
 from app.models.procurement_file import ProcurementFile, ProcurementFileLine
 from app.models.project_file import ProjectFile
+from app.models.official_pricing import (
+    OfficialPriceLine,
+    OfficialPriceSnapshot,
+    OfficialSupplierPriceResult,
+    OfficialSupplierQuery,
+)
 from app.models.activity_log import ActivityLog
 
 __all__ = [
@@ -31,4 +37,8 @@ __all__ = [
     "ProcurementFileLine",
     "ProjectFile",
     "ActivityLog",
+    "OfficialSupplierQuery",
+    "OfficialSupplierPriceResult",
+    "OfficialPriceSnapshot",
+    "OfficialPriceLine",
 ]

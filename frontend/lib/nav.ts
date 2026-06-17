@@ -26,7 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "טעינת BOM", href: "/upload-bom", icon: Upload },
   { label: "איכות BOM", href: "/quality", icon: ShieldCheck },
   { label: "מחירון סין", href: "/china-quote", icon: DollarSign },
-  { label: "נציגים רשמיים", href: "/rep-quote", icon: Users },
+  { label: "מחירון רשמי", href: "/official-pricing", icon: Users },
   { label: "גרסאות", href: "/versions", icon: GitBranch },
   { label: "השוואת שינויים", href: "/changes", icon: GitCompare },
   { label: "דוחות וייצוא", href: "/export", icon: FileDown },

@@ -24,6 +24,30 @@ class Settings(BaseSettings):
     file_storage_backend: str = "local"
     local_storage_dir: str = "/data/uploads"
 
+    # Official supplier API credentials (Digi-Key, Mouser).
+    digikey_client_id: str = ""
+    digikey_client_secret: str = ""
+    digikey_env: str = "sandbox"
+    mouser_api_key: str = ""
+    supplier_api_timeout_seconds: int = 20
+    supplier_api_max_retries: int = 2
+    supplier_api_mock: bool = False
+    supplier_api_mock_allow_export: bool = False
+
+    @property
+    def digikey_configured(self) -> bool:
+        return bool(self.digikey_client_id.strip() and self.digikey_client_secret.strip())
+
+    @property
+    def mouser_configured(self) -> bool:
+        return bool(self.mouser_api_key.strip())
+
+    @property
+    def digikey_api_base(self) -> str:
+        if self.digikey_env.lower() == "production":
+            return "https://api.digikey.com"
+        return "https://sandbox-api.digikey.com"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

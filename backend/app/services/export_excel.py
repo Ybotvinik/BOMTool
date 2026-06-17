@@ -16,7 +16,11 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BomLine, BomVersion, Customer, PricingLine, PricingSnapshot, Project
+from app.models import BomLine, BomVersion, Customer, OfficialPriceLine, PricingLine, PricingSnapshot, Project
+from app.services.suppliers.official_pricing import (
+    get_latest_exportable_snapshot,
+    snapshot_lines_by_bom_line,
+)
 
 # Official/market prices in this export are reference prices only — not final customer
 # quote prices. Customer Quote Price is a future commercial pricing layer.
@@ -312,6 +316,24 @@ def _extract_explicit_official_source(line: BomLine) -> str | None:
     return None
 
 
+def _resolve_official_row_from_snapshot(
+    line: BomLine, snap_line: OfficialPriceLine | None
+) -> tuple[str, float | None]:
+    """Resolve official source + unit price from an official price snapshot line."""
+    if snap_line is None:
+        return "TBD", None
+    source = snap_line.official_source or "TBD"
+    if source.upper() == "DNP" or snap_line.pricing_status == "priced" and source == "DNP":
+        return "DNP", None
+    if snap_line.pricing_status == "missing_price" or source == "TBD":
+        return "TBD", None
+    if _is_forbidden_official_source(source):
+        return "TBD", None
+    if snap_line.official_unit_price is not None:
+        return source, float(snap_line.official_unit_price)
+    return source, None
+
+
 def _resolve_official_row(line: BomLine) -> tuple[str, float | None]:
     """Resolve official source + unit price. No generic fallbacks; no price without source."""
     explicit = _extract_explicit_official_source(line)
@@ -392,6 +414,11 @@ def build_customer_bom_review_xlsx(
 
     _clear_bom_row_values(ws, TEMPLATE_DATA_START_ROW, data_end_row)
 
+    official_snapshot = get_latest_exportable_snapshot(db, version.id)
+    snapshot_by_line: dict[int, OfficialPriceLine] = {}
+    if official_snapshot is not None:
+        snapshot_by_line = snapshot_lines_by_bom_line(db, official_snapshot.id)
+
     written_sources: list[str] = []
 
     for row_offset, ln in enumerate(lines):
@@ -405,7 +432,11 @@ def build_customer_bom_review_xlsx(
             notes = _DNP_NOTE
         else:
             _apply_row_styles(ws, row, style_sources)
-            official_source, unit_price = _resolve_official_row(ln)
+            snap_line = snapshot_by_line.get(ln.id)
+            if snap_line is not None:
+                official_source, unit_price = _resolve_official_row_from_snapshot(ln, snap_line)
+            else:
+                official_source, unit_price = _resolve_official_row(ln)
             notes = ln.notes
 
         written_sources.append(official_source)
