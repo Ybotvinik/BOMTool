@@ -19,6 +19,8 @@ services:
   backend:
     build: ./backend
     container_name: glintech_backend
+    env_file:
+      - ./backend/.env
     command: ["bash", "-c", "sed 's/\\r$//' entrypoint.sh | bash -s"]
     depends_on:
       db:
