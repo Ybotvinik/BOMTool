@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,6 +22,8 @@ from app.schemas.official_pricing import (
     OfficialPricingResultsResponse,
     OfficialSnapshotCreateRequest,
     OfficialSnapshotCreateResponse,
+    EastQuoteUploadResult,
+    IncludeEastPricingRequest,
     SelectOfferRequest,
     SupplierConfigStatus,
     SupplierOffer,
@@ -29,6 +31,7 @@ from app.schemas.official_pricing import (
     SupplierTestRequest,
     SupplierTestResponse,
     WorkbenchExportRequest,
+    PricingComparison,
     WorkbenchLineResult,
     WorkbenchResultsResponse,
     WorkbenchSummary,
@@ -48,6 +51,13 @@ from app.services.suppliers.workbench import (
     save_manual_source,
     save_mpn_override,
     select_line_offer,
+)
+from app.services.east_quotes.service import (
+    archive_east_quote,
+    list_east_quotes,
+    set_active_quote,
+    set_include_east_pricing,
+    upload_east_quote,
 )
 
 router = APIRouter(prefix="/official-pricing", tags=["official-pricing"])
@@ -154,6 +164,13 @@ def get_workbench(
         config=SupplierConfigStatus(**supplier_config_status(get_settings())),
         summary=WorkbenchSummary(**data["summary"]),
         lines=[WorkbenchLineResult(**ln) for ln in data["lines"]],
+        include_east_pricing=data.get("include_east_pricing", False),
+        east_quotes=data.get("east_quotes", []),
+        pricing_comparison=(
+            PricingComparison(**data["pricing_comparison"])
+            if data.get("pricing_comparison")
+            else None
+        ),
     )
 
 
@@ -314,3 +331,87 @@ def get_snapshot(
         is_mock=snapshot.is_mock,
         lines=[OfficialPriceLineRead.model_validate(ln) for ln in lines],
     )
+
+
+@router.get("/east-quotes")
+def get_east_quotes(
+    project_id: int = Query(...),
+    bom_version_id: int = Query(...),
+    supplier_name: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return list_east_quotes(
+        db, project_id=project_id, bom_version_id=bom_version_id, supplier_name=supplier_name
+    )
+
+
+@router.post("/east-quotes/upload", response_model=EastQuoteUploadResult)
+async def post_east_quote_upload(
+    file: UploadFile = File(...),
+    project_id: int = Form(...),
+    bom_version_id: int = Form(...),
+    supplier_name: str = Form(default="Link"),
+    replace_existing: bool = Form(default=False),
+    quote_id_to_replace: int | None = Form(default=None),
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> EastQuoteUploadResult:
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="קובץ ריק")
+    try:
+        result = upload_east_quote(
+            db,
+            content=content,
+            filename=file.filename or "east-quote.xlsx",
+            project_id=project_id,
+            bom_version_id=bom_version_id,
+            supplier_name=supplier_name,
+            replace_existing=replace_existing,
+            quote_id_to_replace=quote_id_to_replace,
+            user_id=user_id,
+        )
+        return EastQuoteUploadResult(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/east-quotes/{quote_id}/activate")
+def patch_activate_east_quote(
+    quote_id: int,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    try:
+        return set_active_quote(db, quote_id, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/east-quotes/{quote_id}")
+def delete_east_quote(
+    quote_id: int,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    try:
+        return archive_east_quote(db, quote_id, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/workbench/include-east-pricing")
+def patch_include_east_pricing(
+    payload: IncludeEastPricingRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> dict:
+    try:
+        return set_include_east_pricing(
+            db,
+            bom_version_id=payload.bom_version_id,
+            include=payload.include_east_pricing,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

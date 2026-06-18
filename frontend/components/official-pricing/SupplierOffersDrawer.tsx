@@ -1,20 +1,178 @@
 "use client";
 
-import { X, ExternalLink } from "lucide-react";
+import clsx from "clsx";
+import { X, ExternalLink, Lock, Star, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui";
-import { fmtPrice, type WorkbenchLine } from "./types";
+import { fmtPrice, type SupplierOffer, type WorkbenchLine } from "./types";
 
 type Props = {
   line: WorkbenchLine | null;
+  includeEast: boolean;
   onClose: () => void;
-  onSelectSupplier: (supplier: string, needsReview: boolean) => void;
+  onSelectSupplier: (supplier: string, needsReview: boolean, internalOnly?: boolean) => void;
   onSelectTbd: () => void;
   onSelectDnp: () => void;
   onOpenManual: () => void;
 };
 
+function fmtDelta(v: number | null | undefined, currency = "USD") {
+  if (v == null || v === 0) return "—";
+  const sign = v > 0 ? "+" : "";
+  return `${sign}${fmtPrice(v, currency)}`;
+}
+
+function MatchBadge({ offer }: { offer: SupplierOffer }) {
+  if (offer.needs_review) {
+    return <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-[9px]">Possible</Badge>;
+  }
+  if (offer.is_exact_match) {
+    return <Badge className="bg-green-50 text-green-700 border-green-200 text-[9px]">Exact</Badge>;
+  }
+  return <Badge className="bg-slate-100 text-slate-600 text-[9px]">{offer.match_status ?? "—"}</Badge>;
+}
+
+function OfferCard({
+  offer,
+  onSelect,
+  disabled,
+}: {
+  offer: SupplierOffer;
+  onSelect: () => void;
+  disabled?: boolean;
+}) {
+  const selected = offer.is_currently_selected;
+  const recommended = offer.is_recommended;
+
+  return (
+    <div
+      className={clsx(
+        "rounded-lg p-3 text-[12px] border-2 transition-colors",
+        selected
+          ? "border-brand bg-brand/5"
+          : recommended
+            ? "border-green-300 bg-green-50/40"
+            : offer.disabled_in_current_mode
+              ? "border-slate-100 bg-slate-50/80 opacity-80"
+              : "border-slate-200 bg-white",
+      )}
+    >
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold">{offer.supplier_display}</span>
+          {offer.internal_only && (
+            <>
+              <Badge className="bg-amber-50 text-amber-800 border-amber-200 text-[9px]">פנימי</Badge>
+              <Badge className="bg-slate-100 text-slate-600 border-slate-200 text-[9px]">מזרח</Badge>
+            </>
+          )}
+          {selected && (
+            <span className="inline-flex items-center gap-0.5 text-[9px] text-brand font-semibold">
+              <CheckCircle2 className="w-3 h-3" /> נבחר כרגע
+            </span>
+          )}
+          {recommended && !selected && (
+            <span className="inline-flex items-center gap-0.5 text-[9px] text-green-700 font-semibold">
+              <Star className="w-3 h-3" /> מומלץ לפי מצב התמחור
+            </span>
+          )}
+        </div>
+        <MatchBadge offer={offer} />
+      </div>
+
+      {offer.disabled_reason && (
+        <p className="text-[10px] text-amber-700 mb-2 flex items-center gap-1">
+          <Lock className="w-3 h-3" />
+          {offer.disabled_reason}
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-600">
+        {offer.internal_only ? (
+          <>
+            <span className="col-span-2">
+              מק״ט יצרן:{" "}
+              <span className="font-mono text-[11px] text-slate-800">
+                {offer.matched_mpn ?? offer.mpn ?? "—"}
+              </span>
+            </span>
+            <span className="col-span-2">
+              מק״ט ספק:{" "}
+              <span className="font-mono text-[11px] text-slate-800">
+                {offer.supplier_part_number ?? "—"}
+              </span>
+            </span>
+          </>
+        ) : (
+          <span>
+            PN: <span className="font-mono text-[11px]">{offer.supplier_part_number ?? "—"}</span>
+          </span>
+        )}
+        <span>
+          Unit: <strong className="text-slate-800">{fmtPrice(offer.unit_price, offer.currency)}</strong>
+        </span>
+        <span>
+          Ext: <strong className="text-slate-800">{fmtPrice(offer.extended_price, offer.currency)}</strong>
+        </span>
+        <span>Stock: {offer.stock ?? "—"}</span>
+        <span>Break: {offer.price_break_qty ?? "—"}</span>
+        <span>Lead: {offer.lead_time ?? "—"}</span>
+      </div>
+
+      <div className="mt-2 pt-2 border-t border-slate-100 grid grid-cols-2 gap-1 text-[10px]">
+        <span className="text-slate-500">
+          Δ מול נבחר:{" "}
+          <span
+            className={clsx(
+              "font-medium tabular-nums",
+              (offer.delta_vs_selected ?? 0) < 0 ? "text-green-700" : (offer.delta_vs_selected ?? 0) > 0 ? "text-red-600" : "text-slate-600",
+            )}
+          >
+            {fmtDelta(offer.delta_vs_selected, offer.currency)}
+          </span>
+        </span>
+        <span className="text-slate-500">
+          Δ מול רשמי:{" "}
+          <span className="font-medium tabular-nums text-slate-700">
+            {fmtDelta(offer.delta_vs_official_best, offer.currency)}
+          </span>
+        </span>
+        {offer.savings_vs_official != null && offer.savings_vs_official > 0 && (
+          <span className="col-span-2 text-green-700 font-medium">
+            חיסכון מול מחיר רשמי: {fmtPrice(offer.savings_vs_official, offer.currency)}
+          </span>
+        )}
+      </div>
+
+      {offer.comments && <p className="text-[10px] text-slate-500 mt-1.5">{offer.comments}</p>}
+      {offer.match_reason && <p className="text-[10px] text-slate-400 mt-0.5">{offer.match_reason}</p>}
+
+      <div className="flex items-center gap-2 mt-3">
+        <button
+          type="button"
+          disabled={disabled || offer.disabled_in_current_mode}
+          onClick={onSelect}
+          className="h-7 px-3 rounded-md bg-brand text-white text-[11px] hover:bg-brand/90 disabled:opacity-40"
+        >
+          בחר
+        </button>
+        {offer.product_url && (
+          <a
+            href={offer.product_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" /> מוצר
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function SupplierOffersDrawer({
   line,
+  includeEast,
   onClose,
   onSelectSupplier,
   onSelectTbd,
@@ -23,82 +181,109 @@ export function SupplierOffersDrawer({
 }: Props) {
   if (!line) return null;
 
+  const apiOffers = line.offers.filter((o) => !o.internal_only);
+  const eastOffers = line.offers.filter((o) => o.internal_only);
+  const lp = line.line_pricing;
+
   return (
     <div className="fixed inset-0 z-50 flex justify-start">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <aside className="relative w-full max-w-lg bg-white border-s border-slate-200 shadow-xl flex flex-col h-full ms-auto">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-          <div>
-            <h2 className="text-[14px] font-bold text-navy">הצעות ספק</h2>
-            <p className="text-[11px] text-slate-500 font-mono mt-0.5">{line.mpn ?? "—"}</p>
+      <aside className="relative w-full max-w-xl bg-white border-s border-slate-200 shadow-xl flex flex-col h-full ms-auto">
+        <div className="px-4 py-3 border-b border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-[14px] font-bold text-navy">השוואת הצעות ספק</h2>
+              <p className="text-[11px] text-slate-500 font-mono mt-0.5">{line.mpn ?? "—"}</p>
+            </div>
+            <button onClick={onClose} className="h-8 w-8 rounded-md hover:bg-slate-100 flex items-center justify-center">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button onClick={onClose} className="h-8 w-8 rounded-md hover:bg-slate-100 flex items-center justify-center">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {line.offers.length === 0 && (
-            <p className="text-[12px] text-slate-400 text-center py-8">אין הצעות ספק — משוך מחירים תחילה</p>
+          {line.east_pricing_disabled_note && (
+            <p className="text-[10px] text-amber-700 mt-1">{line.east_pricing_disabled_note}</p>
           )}
-
-          {line.offers.map((offer) => (
-            <div key={offer.supplier} className="border border-slate-200 rounded-lg p-3 text-[12px]">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-semibold">{offer.supplier_display}</span>
-                {offer.needs_review ? (
-                  <Badge className="bg-amber-50 text-amber-700 border-amber-200">Needs Review</Badge>
-                ) : offer.is_exact_match ? (
-                  <Badge className="bg-green-50 text-green-700 border-green-200">Exact</Badge>
-                ) : (
-                  <Badge className="bg-slate-100 text-slate-600">{offer.match_status}</Badge>
-                )}
+          {lp && (
+            <div className="mt-2 grid grid-cols-3 gap-2 rounded-md bg-slate-50 border border-slate-100 p-2 text-[10px]">
+              <div>
+                <p className="text-slate-500">מחיר רשמי מיטבי</p>
+                <p className="font-bold tabular-nums">
+                  {lp.has_official_price ? fmtPrice(lp.official_best_extended) : "אין מחיר רשמי"}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-600">
-                <span>PN: <span className="font-mono text-[11px]">{offer.supplier_part_number ?? "—"}</span></span>
-                <span>Unit: {fmtPrice(offer.unit_price, offer.currency)}</span>
-                <span>Ext: {fmtPrice(offer.extended_price, offer.currency)}</span>
-                <span>Stock: {offer.stock ?? "—"}</span>
-                <span>Break: {offer.price_break_qty ?? "—"}</span>
-                <span>Lead: {offer.lead_time ?? "—"}</span>
+              <div>
+                <p className="text-slate-500">מחיר מזרח מיטבי</p>
+                <p className="font-bold tabular-nums text-amber-800">
+                  {lp.has_east_price ? fmtPrice(lp.east_best_extended) : "אין מחיר מזרח"}
+                </p>
               </div>
-              {offer.match_reason && (
-                <p className="text-[10px] text-slate-400 mt-1">{offer.match_reason}</p>
-              )}
-              <div className="flex items-center gap-2 mt-3">
-                <button
-                  type="button"
-                  onClick={() => onSelectSupplier(offer.supplier, offer.needs_review)}
-                  className="h-7 px-3 rounded-md bg-brand text-white text-[11px] hover:bg-brand/90"
+              <div>
+                <p className="text-slate-500">פער רשמי − מזרח</p>
+                <p
+                  className={clsx(
+                    "font-bold tabular-nums",
+                    (lp.difference ?? 0) > 0 ? "text-green-700" : (lp.difference ?? 0) < 0 ? "text-amber-700" : "text-slate-700",
+                  )}
                 >
-                  בחר
-                </button>
-                {offer.product_url && (
-                  <a
-                    href={offer.product_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
-                  >
-                    <ExternalLink className="h-3 w-3" /> מוצר
-                  </a>
-                )}
+                  {lp.difference != null ? fmtPrice(lp.difference) : "—"}
+                  {lp.difference_percent != null && (
+                    <span className="text-[9px] font-normal ms-1">({lp.difference_percent.toFixed(1)}%)</span>
+                  )}
+                </p>
               </div>
             </div>
-          ))}
+          )}
+        </div>
 
-          <div className="border-t border-slate-200 pt-3 space-y-2">
-            <p className="text-[11px] text-slate-500 font-medium">אפשרויות נוספות</p>
-            <button type="button" onClick={onOpenManual} className="w-full h-8 rounded-md border border-slate-200 text-[12px] hover:bg-slate-50">
-              Manual — הזנה ידנית
-            </button>
-            <button type="button" onClick={onSelectTbd} className="w-full h-8 rounded-md border border-slate-200 text-[12px] hover:bg-slate-50">
-              TBD — ללא מקור
-            </button>
-            <button type="button" onClick={onSelectDnp} className="w-full h-8 rounded-md border border-slate-200 text-[12px] hover:bg-slate-50">
-              DNP
-            </button>
-          </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {line.offers.length === 0 && (
+            <p className="text-[12px] text-slate-400 text-center py-8">אין הצעות — משוך מחירים או העלה מחירון מזרח</p>
+          )}
+
+          {apiOffers.length > 0 && (
+            <section>
+              <p className="text-[11px] font-semibold text-slate-600 mb-2">א. מחירי API רשמיים</p>
+              <div className="space-y-3">
+                {apiOffers.map((offer) => (
+                  <OfferCard
+                    key={offer.supplier}
+                    offer={offer}
+                    onSelect={() => onSelectSupplier(offer.supplier, offer.needs_review, false)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {eastOffers.length > 0 && (
+            <section>
+              <p className="text-[11px] font-semibold text-slate-600 mb-2">ב. מחירי מזרח / פנימי</p>
+              <div className="space-y-3">
+                {eastOffers.map((offer) => (
+                  <OfferCard
+                    key={`${offer.supplier}-${offer.supplier_part_number}`}
+                    offer={offer}
+                    disabled={!includeEast}
+                    onSelect={() => onSelectSupplier(offer.supplier, offer.needs_review, true)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <p className="text-[11px] font-semibold text-slate-600 mb-2">ג. ידני / חריג</p>
+            <div className="space-y-2">
+              <button type="button" onClick={onOpenManual} className="w-full h-8 rounded-md border border-slate-200 text-[12px] hover:bg-slate-50">
+                Manual — הזנה ידנית
+              </button>
+              <button type="button" onClick={onSelectTbd} className="w-full h-8 rounded-md border border-slate-200 text-[12px] hover:bg-slate-50">
+                TBD — ללא מקור
+              </button>
+              <button type="button" onClick={onSelectDnp} className="w-full h-8 rounded-md border border-slate-200 text-[12px] hover:bg-slate-50">
+                DNP
+              </button>
+            </div>
+          </section>
         </div>
       </aside>
     </div>

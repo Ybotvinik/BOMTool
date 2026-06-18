@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
 import { SupplierOffersDrawer } from "@/components/official-pricing/SupplierOffersDrawer";
+import { EastQuotesPanel, type EastQuoteRow } from "@/components/official-pricing/EastQuotesPanel";
+import { PricingModeSwitch } from "@/components/official-pricing/PricingModeSwitch";
+import { PricingComparisonCards } from "@/components/official-pricing/PricingComparisonCards";
 import {
   FILTERS,
   fmtPrice,
@@ -23,6 +26,7 @@ import {
   type FilterKey,
   type WorkbenchLine,
   type WorkbenchSummary,
+  type PricingComparison,
 } from "@/components/official-pricing/types";
 import { apiDownloadPost, apiGet, apiPatch, apiPost, triggerBlobDownload } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
@@ -36,6 +40,9 @@ type WorkbenchResponse = {
   config: ConfigStatus;
   summary: WorkbenchSummary;
   lines: WorkbenchLine[];
+  include_east_pricing: boolean;
+  east_quotes: EastQuoteRow[];
+  pricing_comparison: PricingComparison | null;
 };
 
 type FetchResponse = {
@@ -80,10 +87,11 @@ function CompactKpi({
   );
 }
 
-function SourceBadge({ source }: { source: string }) {
+function SourceBadge({ source, internal }: { source: string; internal?: boolean }) {
   const map: Record<string, string> = {
     "Digi-Key": "bg-blue-50 text-blue-700 border-blue-200",
     Mouser: "bg-violet-50 text-violet-700 border-violet-200",
+    Link: "bg-amber-50 text-amber-800 border-amber-200",
     Manual: "bg-sky-50 text-sky-700 border-sky-200",
     TBD: "bg-slate-100 text-slate-600 border-slate-300",
     DNP: "bg-slate-200 text-slate-500 border-slate-300",
@@ -91,9 +99,20 @@ function SourceBadge({ source }: { source: string }) {
   const style =
     map[source] ??
     (source.startsWith("Manual") ? map.Manual : "bg-slate-100 text-slate-700 border-slate-200");
+  const isLink = source === "Link" || internal;
   return (
-    <span title="מקור המחיר שנבחר לשורת BOM זו">
+    <span className="inline-flex items-center gap-0.5 flex-wrap" title="מקור המחיר שנבחר לשורת BOM זו">
       <Badge className={style}>{source}</Badge>
+      {isLink && (
+        <>
+          <span className="text-[8px] px-1 py-px rounded bg-amber-100 text-amber-800 border border-amber-200 leading-tight">
+            פנימי
+          </span>
+          <span className="text-[8px] px-1 py-px rounded bg-slate-100 text-slate-600 border border-slate-200 leading-tight">
+            מזרח
+          </span>
+        </>
+      )}
     </span>
   );
 }
@@ -225,6 +244,9 @@ function OfficialPricingPageInner() {
   const [manualLine, setManualLine] = useState<WorkbenchLine | null>(null);
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [includeEast, setIncludeEast] = useState(false);
+  const [eastQuotes, setEastQuotes] = useState<EastQuoteRow[]>([]);
+  const [pricingComparison, setPricingComparison] = useState<PricingComparison | null>(null);
   const [manualForm, setManualForm] = useState({
     supplier_name: "",
     supplier_part_number: "",
@@ -266,6 +288,9 @@ function OfficialPricingPageInner() {
     setConfig(data.config);
     setLines(data.lines);
     setSummary(data.summary);
+    setIncludeEast(data.include_east_pricing);
+    setEastQuotes(data.east_quotes ?? []);
+    setPricingComparison(data.pricing_comparison ?? null);
   }, [projectId, versionId]);
 
   useEffect(() => {
@@ -365,7 +390,7 @@ function OfficialPricingPageInner() {
     }
   }
 
-  async function selectOffer(supplier: string, needsReview: boolean) {
+  async function selectOffer(supplier: string, needsReview: boolean, internalOnly?: boolean) {
     if (projectId == null || versionId == null || !drawerLine) return;
     const row = await apiPost<WorkbenchLine>(
       "/api/official-pricing/workbench/select",
@@ -373,7 +398,7 @@ function OfficialPricingPageInner() {
         project_id: projectId,
         bom_version_id: versionId,
         bom_line_id: drawerLine.bom_line_id,
-        offer_type: "supplier",
+        offer_type: internalOnly ? "east_quote" : "supplier",
         supplier,
         manually_approved_possible_match: needsReview,
       },
@@ -526,6 +551,28 @@ function OfficialPricingPageInner() {
 
       {error && <div className="px-2 py-0.5 rounded-md border border-red-200 bg-red-50 text-red-800 text-[11px] shrink-0">{error}</div>}
 
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,360px)_1fr] gap-2 shrink-0">
+        <PricingModeSwitch
+          includeEast={includeEast}
+          versionId={versionId}
+          userId={user.id}
+          onChange={setIncludeEast}
+          onSaved={() => loadWorkbench().catch(() => {})}
+          onError={setError}
+          disabled={busy}
+        />
+        <EastQuotesPanel
+          projectId={projectId}
+          versionId={versionId}
+          userId={user.id}
+          quotes={eastQuotes}
+          onChanged={() => loadWorkbench().catch(() => {})}
+          onError={setError}
+        />
+      </div>
+
+      <PricingComparisonCards comparison={pricingComparison} activeModeEast={includeEast} />
+
       <Card className="p-1.5 flex flex-col min-h-0 flex-1 overflow-hidden">
         <div className="flex flex-wrap items-center gap-1.5 mb-1 shrink-0">
           <select className={`${selCompact} min-w-[120px] flex-1 max-w-[180px]`} title="פרויקט" value={projectId ?? ""} onChange={(e) => setProjectId(Number(e.target.value))}>
@@ -574,7 +621,6 @@ function OfficialPricingPageInner() {
 
         {summary && (
           <div className="flex flex-wrap items-center gap-1 mb-1 shrink-0">
-            <CompactKpi label="Current Selection" value={fmtPrice(summary.selected_total_cost)} />
             <CompactKpi label="Has Solution" value={String(summary.has_solution)} tone="good" />
             <CompactKpi label="Needs Approval" value={String(summary.needs_approval)} tone="warn" />
             <CompactKpi label="No Solution" value={String(summary.no_solution)} tone="bad" />
@@ -691,7 +737,9 @@ function OfficialPricingPageInner() {
                   <td className="py-1 px-1.5 align-top truncate" title={ln.description ?? undefined}>{ln.description ?? "—"}</td>
                   <td className="py-1 px-1.5 tabular-nums align-top">{ln.required_qty ?? "—"}</td>
                   <td className="py-1 px-1.5 align-top text-center">{ln.dnp ? "✓" : "—"}</td>
-                  <td className="py-1 px-1.5 align-top"><SourceBadge source={ln.source} /></td>
+                  <td className="py-1 px-1.5 align-top">
+                    <SourceBadge source={ln.source} internal={ln.source_is_internal} />
+                  </td>
                   <td className="py-1 px-1.5 align-top font-mono text-[10px] truncate" title={ln.supplier_part_number ?? undefined}>{ln.supplier_part_number ?? "—"}</td>
                   <td className="py-1 px-1.5 align-top tabular-nums">{fmtPrice(ln.unit_price, ln.currency)}</td>
                   <td className="py-1 px-1.5 align-top tabular-nums">{fmtPrice(ln.extended_price, ln.currency)}</td>
@@ -725,6 +773,7 @@ function OfficialPricingPageInner() {
 
       <SupplierOffersDrawer
         line={drawerLine}
+        includeEast={includeEast}
         onClose={() => setDrawerLine(null)}
         onSelectSupplier={selectOffer}
         onSelectTbd={() => selectSpecial("tbd")}

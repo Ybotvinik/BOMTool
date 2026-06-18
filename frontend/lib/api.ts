@@ -128,6 +128,32 @@ export async function apiChinaPreview<T>(opts: {
   return res.json() as Promise<T>;
 }
 
+export async function apiEastQuoteUpload<T>(opts: {
+  file: File;
+  projectId: number;
+  bomVersionId: number;
+  supplierName?: string;
+  replaceExisting?: boolean;
+  quoteIdToReplace?: number;
+  userId?: number;
+}): Promise<T> {
+  const path = "/api/official-pricing/east-quotes/upload";
+  const form = new FormData();
+  form.append("file", opts.file);
+  form.append("project_id", String(opts.projectId));
+  form.append("bom_version_id", String(opts.bomVersionId));
+  form.append("supplier_name", opts.supplierName ?? "Link");
+  form.append("replace_existing", String(opts.replaceExisting ?? false));
+  if (opts.quoteIdToReplace != null) {
+    form.append("quote_id_to_replace", String(opts.quoteIdToReplace));
+  }
+  const headers: Record<string, string> = {};
+  if (opts.userId != null) headers["X-User-Id"] = String(opts.userId);
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", headers, body: form });
+  if (!res.ok) await parseError(res, path, "POST");
+  return res.json() as Promise<T>;
+}
+
 /** POST that returns a binary file (e.g. Excel export). */
 export async function apiDownloadPost(
   path: string,

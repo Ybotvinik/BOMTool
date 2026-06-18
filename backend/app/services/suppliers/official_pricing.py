@@ -513,7 +513,20 @@ def create_official_snapshot(
             results_map=results_map,
             override=override,
             priority=priority,
+            east_offers=[],
+            include_east=False,
         )
+
+        if sel.selected_source_type == "east_quote":
+            sel = resolve_line_selection(
+                bl=bl,
+                req_qty=req_f,
+                results_map=results_map,
+                override=None,
+                priority=priority,
+                east_offers=[],
+                include_east=False,
+            )
 
         if sel.selected_source_type == "dnp":
             db.add(

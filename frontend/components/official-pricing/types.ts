@@ -1,6 +1,8 @@
 export type SupplierOffer = {
   supplier: string;
   supplier_display: string;
+  mpn?: string | null;
+  matched_mpn?: string | null;
   supplier_part_number: string | null;
   manufacturer: string | null;
   unit_price: number | null;
@@ -14,6 +16,27 @@ export type SupplierOffer = {
   lead_time: string | null;
   currency: string;
   needs_review: boolean;
+  internal_only?: boolean;
+  source_type?: string | null;
+  source_group?: string | null;
+  comments?: string | null;
+  total_price?: number | null;
+  is_currently_selected?: boolean;
+  is_recommended?: boolean;
+  delta_vs_selected?: number | null;
+  delta_vs_official_best?: number | null;
+  savings_vs_official?: number | null;
+  disabled_in_current_mode?: boolean;
+  disabled_reason?: string | null;
+};
+
+export type LinePricingComparison = {
+  official_best_extended: number | null;
+  east_best_extended: number | null;
+  difference: number | null;
+  difference_percent: number | null;
+  has_official_price: boolean;
+  has_east_price: boolean;
 };
 
 export type WorkbenchLine = {
@@ -42,6 +65,30 @@ export type WorkbenchLine = {
   selected_source_type: string | null;
   user_selected: boolean;
   offers: SupplierOffer[];
+  source_is_internal?: boolean;
+  east_pricing_disabled_note?: string | null;
+  line_pricing?: LinePricingComparison | null;
+  recommended_supplier?: string | null;
+  recommended_internal_only?: boolean;
+};
+
+export type PricingScenarioStats = {
+  total: number;
+  priced_lines: number;
+  needs_approval: number;
+  no_solution: number;
+  no_stock: number;
+  east_selected_lines: number;
+};
+
+export type PricingComparison = {
+  official_only: PricingScenarioStats;
+  with_east: PricingScenarioStats;
+  savings: {
+    amount: number;
+    percent: number | null;
+    is_saving: boolean;
+  };
 };
 
 export type WorkbenchSummary = {

@@ -66,6 +66,8 @@ _DNP_NOTE = "DNP / Not populated"
 
 _FORBIDDEN_CUSTOMER_HEADER_PHRASES = (
     "china",
+    "link",
+    "east supplier",
     "internal",
     "margin",
     "savings",
@@ -106,6 +108,9 @@ _FORBIDDEN_OFFICIAL_SOURCE_VALUES = frozenset(
         "generic price list",
         "price list",
         "official/market price list",
+        "link",
+        "china",
+        "east",
     }
 )
 

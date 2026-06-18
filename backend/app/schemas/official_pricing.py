@@ -84,6 +84,8 @@ class OfficialPricingLineResult(BaseModel):
 class SupplierOffer(BaseModel):
     supplier: str
     supplier_display: str
+    mpn: str | None = None
+    matched_mpn: str | None = None
     supplier_part_number: str | None = None
     manufacturer: str | None = None
     unit_price: float | None = None
@@ -97,6 +99,27 @@ class SupplierOffer(BaseModel):
     lead_time: str | None = None
     currency: str = "USD"
     needs_review: bool = False
+    internal_only: bool = False
+    source_type: str | None = None
+    source_group: str | None = None
+    comments: str | None = None
+    total_price: float | None = None
+    is_currently_selected: bool = False
+    is_recommended: bool = False
+    delta_vs_selected: float | None = None
+    delta_vs_official_best: float | None = None
+    savings_vs_official: float | None = None
+    disabled_in_current_mode: bool = False
+    disabled_reason: str | None = None
+
+
+class LinePricingComparison(BaseModel):
+    official_best_extended: float | None = None
+    east_best_extended: float | None = None
+    difference: float | None = None
+    difference_percent: float | None = None
+    has_official_price: bool = False
+    has_east_price: bool = False
 
 
 class WorkbenchLineResult(BaseModel):
@@ -125,6 +148,32 @@ class WorkbenchLineResult(BaseModel):
     selected_source_type: str | None = None
     user_selected: bool = False
     offers: list[SupplierOffer] = Field(default_factory=list)
+    source_is_internal: bool = False
+    east_pricing_disabled_note: str | None = None
+    line_pricing: LinePricingComparison | None = None
+    recommended_supplier: str | None = None
+    recommended_internal_only: bool = False
+
+
+class PricingScenarioStats(BaseModel):
+    total: float = 0
+    priced_lines: int = 0
+    needs_approval: int = 0
+    no_solution: int = 0
+    no_stock: int = 0
+    east_selected_lines: int = 0
+
+
+class PricingSavings(BaseModel):
+    amount: float = 0
+    percent: float | None = None
+    is_saving: bool = False
+
+
+class PricingComparison(BaseModel):
+    official_only: PricingScenarioStats
+    with_east: PricingScenarioStats
+    savings: PricingSavings
 
 
 class WorkbenchSummary(BaseModel):
@@ -142,6 +191,45 @@ class WorkbenchResultsResponse(BaseModel):
     config: SupplierConfigStatus
     summary: WorkbenchSummary
     lines: list[WorkbenchLineResult]
+    include_east_pricing: bool = False
+    east_quotes: list[dict] = Field(default_factory=list)
+    pricing_comparison: PricingComparison | None = None
+
+
+class EastQuoteSummary(BaseModel):
+    id: int
+    supplier_name: str
+    source_filename: str | None = None
+    sheet_name: str | None = None
+    board_name: str | None = None
+    doc_number: str | None = None
+    revised_date: str | None = None
+    currency: str = "USD"
+    total_price_summary: float | None = None
+    is_active: bool = False
+    status: str
+    lines_count: int = 0
+    matched_count: int = 0
+    created_at: datetime | None = None
+    uploaded_at: datetime | None = None
+
+
+class EastQuoteUploadResult(BaseModel):
+    quote_id: int
+    supplier_name: str
+    source_filename: str
+    board_name: str | None = None
+    doc_number: str | None = None
+    revised_date: str | None = None
+    lines_imported: int
+    dnp_count: int = 0
+    match_summary: dict
+    is_active: bool = True
+
+
+class IncludeEastPricingRequest(BaseModel):
+    bom_version_id: int
+    include_east_pricing: bool
 
 
 class SelectOfferRequest(BaseModel):

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -36,6 +36,9 @@ class BomVersion(Base):
     revised_date: Mapped[str | None] = mapped_column(String(40))
     bom_type: Mapped[str | None] = mapped_column(String(40))
     build_quantity: Mapped[int | None] = mapped_column(Integer)
+    include_east_pricing: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     imported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     imported_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")

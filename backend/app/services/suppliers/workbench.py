@@ -22,13 +22,17 @@ from app.models import (
 from app.services.activity import log_activity
 from app.services.bom_quality import compute_required_qty
 from app.services.suppliers.base import (
+    INTERNAL_SUPPLIERS,
+    SOURCE_TYPE_EAST,
     SUPPLIER_DIGIKEY,
     SUPPLIER_DISPLAY_NAMES,
+    SUPPLIER_LINK,
     SUPPLIER_MOUSER,
     SupplierApiError,
     SupplierPriceResult,
     normalize_mpn,
 )
+from app.services.east_quotes.service import east_offers_by_bom_line, list_east_quotes
 from app.services.suppliers.digikey import DigiKeyClient
 from app.services.suppliers.mouser import MouserClient
 from app.services.suppliers.pricing_store import (
@@ -145,6 +149,91 @@ def _is_exact_result(row: OfficialSupplierPriceResult | None) -> bool:
     )
 
 
+def _is_exact_east_offer(offer: dict) -> bool:
+    return (
+        offer.get("unit_price") is not None
+        and offer.get("is_exact_match")
+        and offer.get("match_status") in ("exact_mpn", "matched")
+    )
+
+
+def _east_has_stock(offer: dict) -> bool:
+    stock = offer.get("stock")
+    if stock is not None and float(stock) == 0:
+        return False
+    return offer.get("unit_price") is not None
+
+
+def _selection_from_east_offer(offer: dict, req_qty: float, *, notes: str | None = None) -> ResolvedSelection:
+    unit = float(offer["unit_price"])
+    stock = float(offer["stock"]) if offer.get("stock") is not None else None
+    has_stock = _east_has_stock(offer)
+    display = offer.get("supplier_display") or SUPPLIER_DISPLAY_NAMES.get(
+        offer.get("supplier", ""), offer.get("supplier", "East")
+    )
+    ext = unit * req_qty
+    is_possible = offer.get("match_status") in ("possible_match", "designator_match")
+    if is_possible:
+        status = STATUS_NEEDS_REVIEW
+        solution = SOLUTION_NEEDS_APPROVAL
+    else:
+        status = STATUS_PRICED if has_stock else STATUS_NO_STOCK
+        solution = SOLUTION_HAS if has_stock else SOLUTION_NEEDS_APPROVAL
+    return ResolvedSelection(
+        source=display,
+        supplier_pn=offer.get("supplier_part_number"),
+        unit_price=unit,
+        extended_price=ext,
+        stock=stock,
+        currency=offer.get("currency") or "USD",
+        lead_time=offer.get("lead_time"),
+        status=status,
+        solution_status=solution,
+        notes=notes or offer.get("match_reason"),
+        selected_supplier=offer.get("supplier"),
+        selected_source_type=SOURCE_TYPE_EAST,
+        price_break_qty=offer.get("price_break_qty"),
+        match_status=offer.get("match_status"),
+        match_reason=offer.get("match_reason"),
+    )
+
+
+def _auto_select_best(
+    api_candidates: list[OfficialSupplierPriceResult | None],
+    east_offers: list[dict],
+    priority: list[str],
+    *,
+    include_east: bool,
+) -> tuple[ResolvedSelection | None, str]:
+    """Return best auto selection and kind: 'api' | 'east'."""
+    exact_api = [c for c in api_candidates if _is_exact_result(c)]
+    exact_east = [o for o in east_offers if include_east and _is_exact_east_offer(o)]
+
+    def api_sort_key(r: OfficialSupplierPriceResult) -> tuple:
+        has_stock = (r.available_qty or 0) > 0
+        price = float(r.unit_price or 0)
+        pri = priority.index(r.supplier) if r.supplier in priority else 99
+        return (0 if has_stock else 1, price, pri)
+
+    def east_sort_key(o: dict) -> tuple:
+        has_stock = 0 if _east_has_stock(o) else 1
+        price = float(o.get("unit_price") or 0)
+        return (has_stock, price)
+
+    best_api = sorted(exact_api, key=api_sort_key)[0] if exact_api else None
+    best_east = sorted(exact_east, key=east_sort_key)[0] if exact_east else None
+
+    if best_api and best_east:
+        api_key = api_sort_key(best_api)
+        east_key = east_sort_key(best_east)
+        if east_key < api_key:
+            return _selection_from_east_offer(best_east, 1.0), "east"  # req_qty applied by caller
+        return None, "api"  # caller builds from api
+    if best_east and not best_api:
+        return _selection_from_east_offer(best_east, 1.0), "east"
+    return None, "api" if best_api else "none"
+
+
 def _auto_select_exact(
     candidates: list[OfficialSupplierPriceResult | None],
     priority: list[str],
@@ -228,8 +317,11 @@ def resolve_line_selection(
     override: OfficialPricingLineOverride | None,
     priority: list[str] | None = None,
     dnp: bool | None = None,
+    east_offers: list[dict] | None = None,
+    include_east: bool = False,
 ) -> ResolvedSelection:
     priority = priority or DEFAULT_SUPPLIER_PRIORITY
+    east_offers = east_offers or []
     is_dnp = dnp if dnp is not None else is_dnp_line(bl)
 
     if is_dnp:
@@ -334,7 +426,27 @@ def resolve_line_selection(
                     match_reason=row.match_reason,
                 )
 
+        if (
+            include_east
+            and override.selected_source_type == SOURCE_TYPE_EAST
+            and override.selected_supplier
+        ):
+            match = next(
+                (o for o in east_offers if o.get("supplier") == override.selected_supplier),
+                None,
+            )
+            if match and match.get("unit_price") is not None:
+                sel = _selection_from_east_offer(match, req_qty, notes=override.note)
+                if override.manually_approved_possible_match:
+                    sel.manually_approved_possible_match = True
+                return sel
+
     candidates = [_result_for_supplier(results_map, bl.id, s) for s in priority]
+    east_sel, kind = _auto_select_best(candidates, east_offers, priority, include_east=include_east)
+    if kind == "east" and east_sel is not None:
+        east_sel.extended_price = (east_sel.unit_price or 0) * req_qty
+        return east_sel
+
     best = _auto_select_exact(candidates, priority)
     if best:
         unit = float(best.unit_price)
@@ -413,6 +525,170 @@ def _offer_from_result(
         "lead_time": row.lead_time,
         "currency": row.currency or "USD",
         "needs_review": row.match_status == "possible_match",
+        "internal_only": False,
+    }
+
+
+def _empty_scenario_stats() -> dict:
+    return {
+        "total": 0.0,
+        "priced_lines": 0,
+        "needs_approval": 0,
+        "no_solution": 0,
+        "no_stock": 0,
+        "east_selected_lines": 0,
+    }
+
+
+def _accumulate_scenario(stats: dict, sel: ResolvedSelection) -> None:
+    if sel.solution_status == SOLUTION_DNP:
+        return
+    if sel.solution_status == SOLUTION_NEEDS_APPROVAL:
+        stats["needs_approval"] += 1
+    elif sel.solution_status == SOLUTION_NO:
+        stats["no_solution"] += 1
+    if sel.status == STATUS_NO_STOCK:
+        stats["no_stock"] += 1
+    if sel.unit_price is not None and sel.source not in ("TBD", "DNP"):
+        stats["priced_lines"] += 1
+        stats["total"] += float(sel.extended_price or 0)
+    if sel.selected_source_type == SOURCE_TYPE_EAST:
+        stats["east_selected_lines"] += 1
+
+
+def _offer_sort_key(offer: dict) -> tuple:
+    stock = offer.get("stock")
+    has_stock = (float(stock) > 0) if stock is not None else True
+    return (0 if has_stock else 1, float(offer.get("unit_price") or 0))
+
+
+def _is_exact_priced_offer(offer: dict, *, internal: bool) -> bool:
+    if offer.get("unit_price") is None:
+        return False
+    if internal:
+        return bool(
+            offer.get("is_exact_match")
+            or offer.get("match_status") in ("exact_mpn", "matched", "designator_match")
+        )
+    return bool(offer.get("is_exact_match") or offer.get("match_status") == "matched")
+
+
+def _best_offer(offers: list[dict], *, internal: bool) -> dict | None:
+    pool = [o for o in offers if bool(o.get("internal_only")) == internal]
+    exact = [o for o in pool if _is_exact_priced_offer(o, internal=internal)]
+    candidates = exact or [o for o in pool if o.get("unit_price") is not None]
+    if not candidates:
+        return None
+    return sorted(candidates, key=_offer_sort_key)[0]
+
+
+def _offer_key(offer: dict) -> str:
+    return f"{offer.get('supplier')}:{offer.get('supplier_part_number') or ''}"
+
+
+def _selection_matches_offer(sel: ResolvedSelection, offer: dict) -> bool:
+    if offer.get("internal_only"):
+        return (
+            sel.selected_source_type == SOURCE_TYPE_EAST
+            and sel.selected_supplier == offer.get("supplier")
+        )
+    return (
+        sel.selected_source_type == SOURCE_TYPE_SUPPLIER
+        and sel.selected_supplier == offer.get("supplier")
+    )
+
+
+def _recommended_offer(
+    offers: list[dict], *, include_east: bool, official_best: dict | None, east_best: dict | None
+) -> dict | None:
+    if not include_east:
+        return official_best
+    if official_best and east_best:
+        o_key = _offer_sort_key(official_best)
+        e_key = _offer_sort_key(east_best)
+        return east_best if e_key < o_key else official_best
+    return east_best or official_best
+
+
+def _enrich_offers(
+    offers: list[dict],
+    *,
+    sel: ResolvedSelection,
+    req_qty: float,
+    include_east: bool,
+    official_best: dict | None,
+    recommended: dict | None,
+) -> list[dict]:
+    selected_ext = (
+        float(sel.extended_price)
+        if sel.unit_price is not None and sel.extended_price is not None
+        else None
+    )
+    official_ext = (
+        float(official_best["extended_price"])
+        if official_best and official_best.get("extended_price") is not None
+        else (
+            float(official_best["unit_price"]) * req_qty
+            if official_best and official_best.get("unit_price") is not None
+            else None
+        )
+    )
+    rec_key = _offer_key(recommended) if recommended else None
+    out: list[dict] = []
+    for o in offers:
+        ext = o.get("extended_price")
+        if ext is None and o.get("unit_price") is not None:
+            ext = float(o["unit_price"]) * req_qty
+        row = {**o, "extended_price": ext}
+        row["is_currently_selected"] = _selection_matches_offer(sel, o)
+        row["is_recommended"] = rec_key is not None and _offer_key(o) == rec_key
+        if ext is not None and selected_ext is not None:
+            row["delta_vs_selected"] = ext - selected_ext
+        else:
+            row["delta_vs_selected"] = None
+        if ext is not None and official_ext is not None:
+            row["delta_vs_official_best"] = ext - official_ext
+            row["savings_vs_official"] = official_ext - ext
+        else:
+            row["delta_vs_official_best"] = None
+            row["savings_vs_official"] = None
+        if o.get("internal_only") and not include_east:
+            row["disabled_in_current_mode"] = True
+            row["disabled_reason"] = "כבוי במצב הנוכחי — זמין פנימי, לא משתתף במצב רשמי בלבד"
+        else:
+            row["disabled_in_current_mode"] = False
+            row["disabled_reason"] = None
+        out.append(row)
+    return out
+
+
+def _line_pricing_comparison(
+    official_best: dict | None, east_best: dict | None, req_qty: float
+) -> dict:
+    def ext(o: dict | None) -> float | None:
+        if o is None:
+            return None
+        if o.get("extended_price") is not None:
+            return float(o["extended_price"])
+        if o.get("unit_price") is not None:
+            return float(o["unit_price"]) * req_qty
+        return None
+
+    o_ext = ext(official_best)
+    e_ext = ext(east_best)
+    diff = None
+    pct = None
+    if o_ext is not None and e_ext is not None:
+        diff = o_ext - e_ext
+        if o_ext > 0:
+            pct = (diff / o_ext) * 100
+    return {
+        "official_best_extended": o_ext,
+        "east_best_extended": e_ext,
+        "difference": diff,
+        "difference_percent": pct,
+        "has_official_price": o_ext is not None,
+        "has_east_price": e_ext is not None,
     }
 
 
@@ -429,6 +705,11 @@ def get_workbench_results(
     version = db.get(BomVersion, bom_version_id)
     if version is None or version.project_id != project_id:
         raise ValueError("BOM version not found")
+
+    include_east = bool(version.include_east_pricing)
+    east_by_line = east_offers_by_bom_line(
+        db, project_id=project_id, bom_version_id=bom_version_id
+    )
 
     bom_lines = list(
         db.scalars(
@@ -449,6 +730,8 @@ def get_workbench_results(
         "dnp": 0,
         "selected_total_cost": 0.0,
     }
+    official_stats = _empty_scenario_stats()
+    with_east_stats = _empty_scenario_stats()
 
     for bl in bom_lines:
         req_qty = bl.required_qty
@@ -457,20 +740,55 @@ def get_workbench_results(
         req_f = float(req_qty or 0)
         override = overrides.get(bl.id)
         dnp = is_dnp_line(bl)
-        sel = resolve_line_selection(
+        line_east = east_by_line.get(bl.id, [])
+
+        sel_official = resolve_line_selection(
             bl=bl,
             req_qty=req_f,
             results_map=results_map,
             override=override,
             priority=priority,
             dnp=dnp,
+            east_offers=line_east,
+            include_east=False,
         )
+        sel_with_east = resolve_line_selection(
+            bl=bl,
+            req_qty=req_f,
+            results_map=results_map,
+            override=override,
+            priority=priority,
+            dnp=dnp,
+            east_offers=line_east,
+            include_east=True,
+        )
+        sel = sel_with_east if include_east else sel_official
 
-        offers = []
+        _accumulate_scenario(official_stats, sel_official)
+        _accumulate_scenario(with_east_stats, sel_with_east)
+
+        offers_raw = []
         for s in priority:
             offer = _offer_from_result(_result_for_supplier(results_map, bl.id, s), req_qty=req_f)
             if offer:
-                offers.append(offer)
+                offers_raw.append(offer)
+        for eo in line_east:
+            offers_raw.append(eo)
+
+        official_best = _best_offer(offers_raw, internal=False)
+        east_best = _best_offer(offers_raw, internal=True)
+        recommended = _recommended_offer(
+            offers_raw, include_east=include_east, official_best=official_best, east_best=east_best
+        )
+        offers = _enrich_offers(
+            offers_raw,
+            sel=sel,
+            req_qty=req_f,
+            include_east=include_east,
+            official_best=official_best,
+            recommended=recommended,
+        )
+        line_cmp = _line_pricing_comparison(official_best, east_best, req_f)
 
         lines.append(
             {
@@ -499,6 +817,20 @@ def get_workbench_results(
                 "selected_source_type": sel.selected_source_type,
                 "user_selected": bool(override and override.user_selected),
                 "offers": offers,
+                "source_is_internal": sel.selected_source_type == SOURCE_TYPE_EAST,
+                "east_pricing_disabled_note": (
+                    "מחיר מזרח כבוי"
+                    if (
+                        not include_east
+                        and override
+                        and override.user_selected
+                        and override.selected_source_type == SOURCE_TYPE_EAST
+                    )
+                    else None
+                ),
+                "line_pricing": line_cmp,
+                "recommended_supplier": recommended.get("supplier_display") if recommended else None,
+                "recommended_internal_only": bool(recommended and recommended.get("internal_only")),
             }
         )
 
@@ -511,10 +843,33 @@ def get_workbench_results(
             summary["no_solution"] += 1
         elif sel.solution_status == SOLUTION_DNP:
             summary["dnp"] += 1
-        if sel.extended_price:
+        if sel.extended_price and (
+            include_east or sel.selected_source_type != SOURCE_TYPE_EAST
+        ):
             summary["selected_total_cost"] += float(sel.extended_price)
 
-    return {"lines": lines, "summary": summary}
+    off_total = official_stats["total"]
+    east_total = with_east_stats["total"]
+    savings_amount = off_total - east_total
+    savings_percent = (savings_amount / off_total * 100) if off_total > 0 else None
+
+    return {
+        "lines": lines,
+        "summary": summary,
+        "include_east_pricing": include_east,
+        "east_quotes": list_east_quotes(
+            db, project_id=project_id, bom_version_id=bom_version_id
+        ),
+        "pricing_comparison": {
+            "official_only": official_stats,
+            "with_east": with_east_stats,
+            "savings": {
+                "amount": savings_amount,
+                "percent": savings_percent,
+                "is_saving": savings_amount > 0,
+            },
+        },
+    }
 
 
 def select_line_offer(
@@ -549,6 +904,11 @@ def select_line_offer(
         if not supplier:
             raise ValueError("supplier required")
         override.selected_source_type = SOURCE_TYPE_SUPPLIER
+        override.selected_supplier = supplier
+    elif offer_type == SOURCE_TYPE_EAST:
+        if not supplier:
+            raise ValueError("supplier required")
+        override.selected_source_type = SOURCE_TYPE_EAST
         override.selected_supplier = supplier
     else:
         raise ValueError(f"Unknown offer_type: {offer_type}")

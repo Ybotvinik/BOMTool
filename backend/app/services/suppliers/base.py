@@ -9,11 +9,16 @@ from typing import Any
 
 SUPPLIER_DIGIKEY = "digikey"
 SUPPLIER_MOUSER = "mouser"
+SUPPLIER_LINK = "link"
 
 SUPPLIER_DISPLAY_NAMES: dict[str, str] = {
     SUPPLIER_DIGIKEY: "Digi-Key",
     SUPPLIER_MOUSER: "Mouser",
+    SUPPLIER_LINK: "Link",
 }
+
+SOURCE_TYPE_EAST = "east_quote"
+INTERNAL_SUPPLIERS = frozenset({SUPPLIER_LINK})
 
 
 class SupplierApiError(Exception):
