@@ -54,6 +54,7 @@ class BomImportCommit(BaseModel):
     # Maps a BOM line field (e.g. "mpn") to a column header from the preview.
     mapping: dict[str, str | None]
     set_active: bool = True
+    target_bom_version_id: int | None = None
 
 
 class BomImportResult(BaseModel):

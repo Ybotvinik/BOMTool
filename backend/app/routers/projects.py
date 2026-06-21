@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -10,10 +10,32 @@ from app.deps import get_current_user_id
 from app.models import ActivityLog, BomVersion, Customer, Project
 from app.schemas.activity_log import ActivityLogRead
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
+from app.schemas.project_overview import ProjectOverviewContext
+from app.schemas.project_workspace import (
+    CardBatchCreate,
+    CardBatchRead,
+    ProjectCardCreate,
+    ProjectCardRead,
+    WorkspaceResponse,
+)
 from app.services.activity import log_activity
-from app.services.project_build import refresh_active_bom_quantities
+from app.services.project_overview import build_project_overview
+from app.services.project_status import PROJECT_STATUSES, normalize_project_status
+from app.services.project_workspace import (
+    build_workspace,
+    create_card_batch,
+    create_project_card,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+@router.get("/workspace", response_model=WorkspaceResponse)
+def get_projects_workspace(
+    q: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> WorkspaceResponse:
+    return WorkspaceResponse(**build_workspace(db, q=q))
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -43,6 +65,53 @@ def create_project(
         change_summary=f"Created project '{project.name}' ({project.code})",
     )
     return project
+
+
+@router.post(
+    "/{project_id}/cards",
+    response_model=ProjectCardRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_project_card(
+    project_id: int,
+    payload: ProjectCardCreate,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> ProjectCardRead:
+    try:
+        card = create_project_card(
+            db,
+            project_id=project_id,
+            name=payload.name,
+            code=payload.code,
+            board_name=payload.board_name,
+            status=payload.status,
+            build_quantity=payload.build_quantity,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(card)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="project_card.create",
+        project_id=project_id,
+        entity_type="project_card",
+        entity_name=card.name,
+        change_summary=f"Created card '{card.name}'",
+    )
+    return ProjectCardRead.model_validate(card)
+
+
+@router.get("/{project_id}/overview", response_model=ProjectOverviewContext)
+def get_project_overview(project_id: int, db: Session = Depends(get_db)) -> ProjectOverviewContext:
+    try:
+        payload = build_project_overview(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ProjectOverviewContext(**payload)
 
 
 @router.get("/{project_id}", response_model=ProjectRead)
@@ -134,27 +203,21 @@ def update_project(
             changes.append("project code changed")
         project.code = new_code
 
-    # --- Status ---
-    if "status" in data and data["status"] and data["status"] != project.status:
-        changes.append("status changed")
-        project.status = data["status"]
-
-    # --- Build quantity ---
-    build_qty_changed = False
-    if "build_quantity" in data:
-        bq = data["build_quantity"]
-        if bq is None or bq <= 0:
-            raise HTTPException(
-                status_code=400, detail="כמות להרכבה חייבת להיות מספר חיובי"
-            )
-        if bq != project.build_quantity:
-            changes.append("build quantity changed")
-            build_qty_changed = True
-        project.build_quantity = bq
+    # --- Status (manual override; card changes auto-sync via project_cards API) ---
+    if "status" in data and data["status"]:
+        st = normalize_project_status(data["status"])
+        if st not in PROJECT_STATUSES:
+            raise HTTPException(status_code=400, detail="סטטוס פרויקט לא תקין")
+        if st != project.status:
+            changes.append("status changed")
+        project.status = st
 
     # --- Description / notes ---
     if "description" in data:
         project.description = data["description"]
+
+    if "drive_folder_url" in data:
+        project.drive_folder_url = (data["drive_folder_url"] or "").strip() or None
 
     if "active_version_id" in data:
         new_vid = data["active_version_id"]
@@ -165,9 +228,6 @@ def update_project(
         if new_vid != project.active_version_id:
             changes.append("active BOM version changed")
         project.active_version_id = new_vid
-
-    if build_qty_changed:
-        refresh_active_bom_quantities(db, project)
 
     db.commit()
     db.refresh(project)

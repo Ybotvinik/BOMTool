@@ -52,7 +52,7 @@ def seed() -> None:
                 name="Radar Control Board v3",
                 code="ELB-RCB-003",
                 build_quantity=1000,
-                status="In Review",
+                status="NEW",
             )
             db.add(project)
             db.flush()

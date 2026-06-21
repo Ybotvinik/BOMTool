@@ -16,7 +16,8 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BomLine, BomVersion, Customer, OfficialPriceLine, PricingLine, PricingSnapshot, Project
+from app.models import BomLine, BomVersion, Customer, OfficialPriceLine, PricingLine, PricingSnapshot, Project, ProjectCard
+from app.services.project_build import effective_build_quantity
 from app.services.suppliers.official_pricing import (
     get_latest_exportable_snapshot,
     snapshot_lines_by_bom_line,
@@ -761,7 +762,8 @@ def build_customer_bom_review_xlsx(
     version_label = version.version_name or version.version_label
     file_name = customer_bom_review_filename(project.code, version_label)
     export_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    build_qty = version.build_quantity or project.build_quantity or 0
+    card = db.get(ProjectCard, version.card_id) if version.card_id else None
+    build_qty = effective_build_quantity(version, card=card, project=project)
 
     wb, ws = _load_customer_template_sheet()
     template_extended_formula = _snapshot_template_extended_formula(ws)
@@ -1031,6 +1033,10 @@ def build_internal_pricing_snapshot_xlsx(
 
 def internal_pricing_workbench_filename(project_code: str, version_name: str) -> str:
     return f"Internal_Pricing_Workbench_{_safe_part(project_code)}_{_safe_part(version_name)}.xlsx"
+
+
+def supplier_workbench_filename(project_code: str, version_name: str) -> str:
+    return f"Supplier_Pricing_Workbench_{_safe_part(project_code)}_{_safe_part(version_name)}.xlsx"
 
 
 def internal_pricing_comparison_filename(project_code: str, version_name: str) -> str:

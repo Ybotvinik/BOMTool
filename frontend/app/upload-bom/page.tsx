@@ -113,6 +113,8 @@ function StepBadge({ n, label, active, done }: { n: number; label: string; activ
 
 function UploadBomInner() {
   const urlProjectId = useSearchParams().get("project_id");
+  const urlVersionId = useSearchParams().get("version_id");
+  const urlCardId = useSearchParams().get("card_id");
   const { user } = useCurrentUser();
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [customers, setCustomers] = useState<ApiCustomer[]>([]);
@@ -128,6 +130,11 @@ function UploadBomInner() {
   const [showMeta, setShowMeta] = useState(false);
   // Track manual edits so re-previews don't clobber a user-entered version name.
   const [versionEdited, setVersionEdited] = useState(false);
+  const [targetVersionLabel, setTargetVersionLabel] = useState<string | null>(null);
+
+  const targetVersionId =
+    urlVersionId && Number.isFinite(Number(urlVersionId)) ? Number(urlVersionId) : null;
+  const importingToExistingBatch = targetVersionId != null;
 
   useEffect(() => {
     Promise.all([
@@ -152,6 +159,20 @@ function UploadBomInner() {
       })
       .catch(() => setError("לא ניתן לטעון פרויקטים — ודא שה-API פעיל."));
   }, [urlProjectId]);
+
+  useEffect(() => {
+    if (!targetVersionId) {
+      setTargetVersionLabel(null);
+      return;
+    }
+    apiGet<{ batch_label: string | null; version_label: string; version_name: string | null }>(
+      `/api/bom-versions/${targetVersionId}`,
+    )
+      .then((v) => {
+        setTargetVersionLabel(v.batch_label ?? v.version_name ?? v.version_label);
+      })
+      .catch(() => setTargetVersionLabel(null));
+  }, [targetVersionId]);
 
   const selectedProject = projects.find((p) => String(p.id) === String(selectedProjectId));
   const canUpload = Boolean(selectedProjectId) && Boolean(selectedProject);
@@ -241,6 +262,9 @@ function UploadBomInner() {
           header_row_index: preview.header_row_index,
           mapping,
           set_active: setActive,
+          ...(targetVersionId != null
+            ? { target_bom_version_id: targetVersionId }
+            : {}),
         },
         user.id,
       );
@@ -261,8 +285,20 @@ function UploadBomInner() {
     <>
       <PageHeader
         title="טעינת BOM"
-        subtitle="העלאת קובץ Excel/CSV, זיהוי שורת כותרות, מיפוי עמודות וייבוא לבסיס הנתונים"
+        subtitle={
+          importingToExistingBatch
+            ? `ייבוא קובץ למנה «${targetVersionLabel ?? targetVersionId}»`
+            : "העלאת קובץ Excel/CSV, זיהוי שורת כותרות, מיפוי עמודות וייבוא לבסיס הנתונים"
+        }
       />
+
+      {importingToExistingBatch && (
+        <Card className="p-3 mb-3 border-brand/25 bg-brand/5 text-[12px] text-slate-700">
+          מייבאים ל<strong className="text-brand"> מנה קיימת</strong>
+          {targetVersionLabel ? ` (${targetVersionLabel})` : ""}
+          {urlCardId ? ` · כרטיס #${urlCardId}` : ""} — הקובץ יחליף את שורות ה-BOM במנה זו.
+        </Card>
+      )}
 
       <Card className="p-3 mb-3">
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">

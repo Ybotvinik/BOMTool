@@ -235,6 +235,7 @@ export default function OfficialPricingPage() {
 
 function OfficialPricingPageInner() {
   const urlProjectId = useSearchParams().get("project_id");
+  const urlVersionId = useSearchParams().get("version_id");
   const activeTab = (useSearchParams().get("tab") as OfficialPricingTab | null) ?? "workbench";
   const { user } = useCurrentUser();
 
@@ -255,6 +256,7 @@ function OfficialPricingPageInner() {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadingWorkbench, setLoadingWorkbench] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [drawerLine, setDrawerLine] = useState<WorkbenchLine | null>(null);
@@ -304,12 +306,14 @@ function OfficialPricingPageInner() {
     const savedVersionId = readLastOfficialPricingVersionId(projectId);
     apiGet<ApiVersion[]>(`/api/bom-versions?project_id=${projectId}`).then((vs) => {
       setVersions(vs);
+      const fromUrl =
+        urlVersionId != null ? vs.find((v) => String(v.id) === urlVersionId) : undefined;
       const fromSaved =
         savedVersionId != null ? vs.find((v) => v.id === savedVersionId) : undefined;
       const active = vs.find((v) => v.is_active) ?? vs[vs.length - 1];
-      setVersionId((fromSaved ?? active)?.id ?? null);
+      setVersionId((fromUrl ?? fromSaved ?? active)?.id ?? null);
     });
-  }, [projectId]);
+  }, [projectId, urlVersionId]);
 
   useEffect(() => {
     if (projectId != null) saveOfficialPricingContext(projectId, versionId);
@@ -327,22 +331,29 @@ function OfficialPricingPageInner() {
 
   const loadWorkbench = useCallback(async () => {
     if (projectId == null || versionId == null) return;
-    const data = await apiGet<WorkbenchResponse>(
-      `/api/official-pricing/workbench?project_id=${projectId}&bom_version_id=${versionId}`,
-    );
-    setConfig(data.config);
-    setLines(data.lines);
-    setSummary(data.summary);
-    setIncludeEast(data.include_east_pricing);
-    setEastQuotes(data.east_quotes ?? []);
-    setPricingComparison(data.pricing_comparison ?? null);
+    setLoadingWorkbench(true);
+    try {
+      const data = await apiGet<WorkbenchResponse>(
+        `/api/official-pricing/workbench?project_id=${projectId}&bom_version_id=${versionId}`,
+      );
+      setConfig(data.config);
+      setLines(data.lines);
+      setSummary(data.summary);
+      setIncludeEast(data.include_east_pricing);
+      setEastQuotes(data.east_quotes ?? []);
+      setPricingComparison(data.pricing_comparison ?? null);
+      setError(null);
+    } catch (e) {
+      setLines([]);
+      setSummary(null);
+      setError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setLoadingWorkbench(false);
+    }
   }, [projectId, versionId]);
 
   useEffect(() => {
-    loadWorkbench().catch(() => {
-      setLines([]);
-      setSummary(null);
-    });
+    loadWorkbench();
   }, [loadWorkbench]);
 
   const updateLine = (row: WorkbenchLine) => {
@@ -595,14 +606,20 @@ function OfficialPricingPageInner() {
           <>
             <button
               type="button"
+              disabled={loadingWorkbench || projectId == null || versionId == null}
               onClick={() => loadWorkbench()}
-              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50"
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50 disabled:opacity-50"
             >
-              <RefreshCw className="w-3.5 h-3.5" /> רענון
+              {loadingWorkbench ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              רענון
             </button>
             <button
               type="button"
-              disabled={busy || !lines.length}
+              disabled={busy || loadingWorkbench || !lines.length}
               onClick={doWorkbenchExport}
               className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50 disabled:opacity-50"
             >
@@ -617,7 +634,7 @@ function OfficialPricingPageInner() {
         tabs={[...OFFICIAL_PRICING_TABS]}
         activeTab={activeTab}
         basePath="/official-pricing"
-        query={{ project_id: projectId }}
+        query={{ project_id: projectId, version_id: versionId }}
       />
 
       {activeTab === "component-check" ? (

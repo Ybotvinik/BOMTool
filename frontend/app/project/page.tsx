@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
@@ -29,7 +29,13 @@ import {
   EditProjectParamsModal,
   type ProjectParamsForm,
 } from "@/components/project/EditProjectParamsModal";
-import { apiDownloadPost, apiGet, triggerBlobDownload } from "@/lib/api";
+import { ProjectScopeBar } from "@/components/project/ProjectScopeBar";
+import { apiDownloadPost, apiGet, apiPatch, triggerBlobDownload } from "@/lib/api";
+import {
+  projectOverviewHref,
+  resolveOverviewSelection,
+  type ProjectOverviewContext,
+} from "@/lib/project-overview";
 import { useCurrentUser } from "@/lib/current-user";
 import { qualityScoreTone } from "@/components/bom/types";
 
@@ -80,6 +86,12 @@ type Metrics = {
   updated_at: string | null;
   build_quantity: number;
   description: string | null;
+  card_id: number | null;
+  card_name: string | null;
+  card_build_quantity: number | null;
+  batch_label: string | null;
+  selected_version_id: number | null;
+  batch_build_quantity: number | null;
 };
 
 function fmt(v: string | number | null | undefined, fallback = "לא זמין") {
@@ -200,37 +212,85 @@ function QualityGauge({ score }: { score: number | null }) {
 function ProjectOverviewInner() {
   const router = useRouter();
   const { user } = useCurrentUser();
-  const urlProjectId = useSearchParams().get("project_id");
-  const [projects, setProjects] = useState<ApiProject[]>([]);
+  const searchParams = useSearchParams();
+  const urlProjectId = searchParams.get("project_id");
+  const urlCardId = searchParams.get("card_id");
+  const urlVersionId = searchParams.get("version_id");
+
+  const [pickerProjects, setPickerProjects] = useState<
+    { id: number; name: string; code: string; customer_name: string }[]
+  >([]);
   const [project, setProject] = useState<ApiProject | null>(null);
+  const [overview, setOverview] = useState<ProjectOverviewContext | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [scopeCardId, setScopeCardId] = useState<number | null>(null);
+  const [scopeVersionId, setScopeVersionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [exportBusy, setExportBusy] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [qtySaving, setQtySaving] = useState(false);
+  const didSyncUrl = useRef(false);
 
-  const load = useCallback(async (id: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [p, m] = await Promise.all([
-        apiGet<ApiProject>(`/api/projects/${id}`),
-        apiGet<Metrics>(`/api/projects/${id}/metrics`),
-      ]);
-      setProject(p);
-      setMetrics(m);
-    } catch {
-      setError("הפרויקט שנבחר לא נמצא");
-      setProject(null);
-      setMetrics(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (id: number, preferredVersionId: number | null = null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [p, ov] = await Promise.all([
+          apiGet<ApiProject>(`/api/projects/${id}`),
+          apiGet<ProjectOverviewContext>(`/api/projects/${id}/overview`),
+        ]);
+        const selection = resolveOverviewSelection(ov, urlCardId, urlVersionId);
+        const versionId = preferredVersionId ?? selection.versionId;
+
+        setProject(p);
+        setOverview(ov);
+        setScopeCardId(selection.cardId);
+        setScopeVersionId(versionId);
+
+        if (versionId != null) {
+          const m = await apiGet<Metrics>(`/api/projects/${id}/metrics?version_id=${versionId}`);
+          setMetrics(m);
+        } else {
+          setMetrics(null);
+        }
+      } catch {
+        setError("הפרויקט שנבחר לא נמצא");
+        setProject(null);
+        setOverview(null);
+        setMetrics(null);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [urlCardId, urlVersionId],
+  );
+
+  useEffect(() => {
+    didSyncUrl.current = false;
+  }, [urlProjectId]);
 
   useEffect(() => {
     if (!urlProjectId) {
-      apiGet<ApiProject[]>("/api/projects").then(setProjects).finally(() => setLoading(false));
+      apiGet<{ customers: { name: string; projects: { id: number; name: string; code: string }[] }[] }>(
+        "/api/projects/workspace",
+      )
+        .then((ws) => {
+          const rows: { id: number; name: string; code: string; customer_name: string }[] = [];
+          for (const c of ws.customers) {
+            for (const p of c.projects) {
+              rows.push({
+                id: p.id,
+                name: p.name,
+                code: p.code,
+                customer_name: c.name,
+              });
+            }
+          }
+          setPickerProjects(rows);
+        })
+        .finally(() => setLoading(false));
       return;
     }
     const id = Number(urlProjectId);
@@ -239,8 +299,65 @@ function ProjectOverviewInner() {
       setLoading(false);
       return;
     }
-    load(id);
-  }, [urlProjectId, load]);
+    const vid = urlVersionId ? Number(urlVersionId) : null;
+    void load(id, vid != null && Number.isFinite(vid) ? vid : null);
+  }, [urlProjectId, urlVersionId, urlCardId, load]);
+
+  useEffect(() => {
+    if (!urlProjectId || !overview || didSyncUrl.current || loading) return;
+    const pid = Number(urlProjectId);
+    const desired = resolveOverviewSelection(overview, urlCardId, urlVersionId);
+    if (desired.cardId == null) return;
+    const needsVersion = desired.versionId != null && urlVersionId == null;
+    const needsCard = urlCardId == null;
+    if (!needsVersion && !needsCard) {
+      didSyncUrl.current = true;
+      return;
+    }
+    didSyncUrl.current = true;
+    router.replace(projectOverviewHref(pid, desired.cardId, desired.versionId));
+  }, [overview, urlProjectId, urlCardId, urlVersionId, loading, router]);
+
+  async function selectCard(cardId: number) {
+    if (!project || !overview) return;
+    const card = overview.cards.find((c) => c.id === cardId);
+    const batch = card?.batches.length
+      ? card.batches.find((b) => b.is_project_active) ?? card.batches[card.batches.length - 1]
+      : null;
+    const versionId = batch?.id ?? null;
+    router.replace(projectOverviewHref(project.id, cardId, versionId));
+    if (versionId != null) {
+      await apiPatch(`/api/projects/${project.id}`, { active_version_id: versionId }, user.id);
+      await load(project.id, versionId);
+    } else {
+      setScopeCardId(cardId);
+      setScopeVersionId(null);
+      setMetrics(null);
+    }
+  }
+
+  async function selectBatch(versionId: number) {
+    if (!project || !overview) return;
+    const card = overview.cards.find((c) => c.batches.some((b) => b.id === versionId));
+    if (!card) return;
+    router.replace(projectOverviewHref(project.id, card.id, versionId));
+    await apiPatch(`/api/projects/${project.id}`, { active_version_id: versionId }, user.id);
+    await load(project.id, versionId);
+  }
+
+  async function saveBatchQuantity(qty: number) {
+    if (!scopeVersionId || !project) return;
+    setQtySaving(true);
+    setError(null);
+    try {
+      await apiPatch(`/api/bom-versions/${scopeVersionId}`, { build_quantity: qty }, user.id);
+      await load(project.id, scopeVersionId);
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setQtySaving(false);
+    }
+  }
 
   async function quickExport(
     key: string,
@@ -274,20 +391,20 @@ function ProjectOverviewInner() {
           <h1 className="text-[20px] font-bold text-navy">סקירת פרויקט</h1>
           <p className="text-[12px] text-slate-500 mt-0.5">מרכז שליטה — בחר פרויקט להצגת Dashboard</p>
         </div>
-        <Card className="p-6 max-w-md shadow-sm">
+        <Card className="p-6 max-w-lg shadow-sm">
           <label className="block text-[12px] text-slate-600 mb-1.5 font-medium">פרויקט</label>
           <select
             value=""
             onChange={(e) => {
               const v = e.target.value;
-              if (v) router.push(`/project?project_id=${v}`);
+              if (v) router.push(projectOverviewHref(Number(v)));
             }}
             className="w-full h-10 rounded-md border border-slate-200 px-3 text-[13px] bg-white"
           >
             <option value="">בחר פרויקט…</option>
-            {projects.map((p) => (
+            {pickerProjects.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name} ({p.code})
+                {p.customer_name} · {p.name} ({p.code})
               </option>
             ))}
           </select>
@@ -296,7 +413,7 @@ function ProjectOverviewInner() {
     );
   }
 
-  if (error || !project || !metrics) {
+  if (error || !project || !overview) {
     return (
       <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-[12.5px] px-3 py-2">
         {error ?? "הפרויקט שנבחר לא נמצא"}
@@ -305,7 +422,8 @@ function ProjectOverviewInner() {
   }
 
   const pid = project.id;
-  const versionId = project.active_version_id ?? metrics.active_bom_version_id;
+  const versionId = scopeVersionId ?? metrics?.selected_version_id ?? project.active_version_id;
+  const selectedCard = overview.cards.find((c) => c.id === scopeCardId) ?? null;
   const bomHref =
     versionId != null ? `/bom?project_id=${pid}&version_id=${versionId}` : `/bom?project_id=${pid}`;
   const qualityHref =
@@ -321,22 +439,30 @@ function ProjectOverviewInner() {
   const paramsForm: ProjectParamsForm = {
     name: project.name,
     customer_id: project.customer_id,
-    build_quantity: String(metrics.effective_build_quantity ?? project.build_quantity),
+    build_quantity: String(
+      metrics?.effective_build_quantity ??
+        metrics?.batch_build_quantity ??
+        selectedCard?.build_quantity ??
+        1,
+    ),
     status: project.status,
-    description: project.description ?? metrics.description ?? "",
-    board_name: metrics.bom_board_name ?? "",
-    source_doc_number: metrics.bom_doc_number ?? "",
-    revision_code: metrics.bom_revision_code ?? "",
-    active_version_id: project.active_version_id ?? "",
-    version_notes: metrics.bom_version_notes ?? "",
+    description: project.description ?? metrics?.description ?? "",
+    board_name: metrics?.bom_board_name ?? selectedCard?.board_name ?? "",
+    source_doc_number: metrics?.bom_doc_number ?? "",
+    revision_code: metrics?.bom_revision_code ?? "",
+    active_version_id: versionId ?? "",
+    version_notes: metrics?.bom_version_notes ?? "",
   };
 
-  const bomVersionLabel = [metrics.active_bom_version_name, metrics.bom_revision_code]
+  const bomVersionLabel = [
+    metrics?.batch_label ?? metrics?.active_bom_version_name,
+    metrics?.bom_revision_code,
+  ]
     .filter(Boolean)
     .join(" · ");
 
   const coveragePct =
-    metrics.bom_non_dnp_lines > 0 && metrics.official_priced_lines != null
+    metrics && metrics.bom_non_dnp_lines > 0 && metrics.official_priced_lines != null
       ? Math.round((metrics.official_priced_lines / metrics.bom_non_dnp_lines) * 100)
       : null;
 
@@ -348,19 +474,47 @@ function ProjectOverviewInner() {
         </div>
       )}
 
+      <ProjectScopeBar
+        overview={overview}
+        cardId={scopeCardId}
+        versionId={scopeVersionId}
+        buildQuantity={metrics?.batch_build_quantity ?? metrics?.effective_build_quantity ?? null}
+        cardDefaultQuantity={selectedCard?.build_quantity ?? metrics?.card_build_quantity ?? null}
+        onCardChange={(id) => void selectCard(id)}
+        onBatchChange={(id) => void selectBatch(id)}
+        onSaveBuildQuantity={saveBatchQuantity}
+        savingQty={qtySaving}
+      />
+
+      {!metrics ? (
+        <Card className="p-8 text-center text-slate-500 text-[13px]">
+          בחר כרטיס ומנה כדי לראות נתוני BOM ותמחור, או צור מנה חדשה מעמוד הפרויקטים.
+        </Card>
+      ) : (
+        <>
       {/* Hero */}
       <Card className="overflow-hidden border-brand/25 shadow-md">
         <div className="bg-gradient-to-l from-brand/8 via-brand/3 to-white px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1 text-right">
               <p className="text-[10px] font-semibold text-brand tracking-wide">
-                מרכז בקרה לפרויקט
+                סקירת פרויקט
               </p>
               <h1 className="text-[24px] font-bold text-navy mt-1 leading-tight">{project.name}</h1>
               <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 mt-2 text-[12px] text-slate-600">
                 <span>
-                  לקוח: <strong className="text-slate-800">{fmt(metrics.customer_name)}</strong>
+                  לקוח: <strong className="text-slate-800">{fmt(overview.customer_name)}</strong>
                 </span>
+                {selectedCard ? (
+                  <span>
+                    כרטיס: <strong className="text-slate-800">{selectedCard.name}</strong>
+                  </span>
+                ) : null}
+                {metrics.batch_label ? (
+                  <span>
+                    מנה: <strong className="text-slate-800">{metrics.batch_label}</strong>
+                  </span>
+                ) : null}
                 <span className="font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
                   {project.code}
                 </span>
@@ -388,7 +542,7 @@ function ProjectOverviewInner() {
               {[
                 ["לוח / Board", fmt(metrics.bom_board_name)],
                 ["מס׳ מסמך", fmt(metrics.bom_doc_number)],
-                ["BOM פעיל", fmt(bomVersionLabel || metrics.active_bom_version_name)],
+                ["מנה / BOM", fmt(bomVersionLabel || metrics.active_bom_version_name)],
                 ["עודכן", fmtDate(metrics.updated_at)],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-lg bg-white/80 border border-slate-100 px-2.5 py-2 text-right">
@@ -415,7 +569,7 @@ function ProjectOverviewInner() {
             </div>
           </div>
           <p className="text-[10px] text-slate-400 mt-2.5 leading-relaxed text-right">
-            כמות להרכבה משמשת כמכפיל לחישוב Required Qty — לא משנה את Qty המקורי של כל שורת BOM
+            כמות להרכבה מוגדרת ברמת המנה — ניתן לעדכן בסרגל ההקשר למעלה
           </p>
         </div>
       </Card>
@@ -653,8 +807,10 @@ function ProjectOverviewInner() {
           versionId={versionId}
           initial={paramsForm}
           onClose={() => setEditOpen(false)}
-          onSaved={() => load(pid)}
+          onSaved={() => load(pid, scopeVersionId)}
         />
+      )}
+        </>
       )}
     </div>
   );

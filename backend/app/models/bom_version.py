@@ -36,6 +36,10 @@ class BomVersion(Base):
     revised_date: Mapped[str | None] = mapped_column(String(40))
     bom_type: Mapped[str | None] = mapped_column(String(40))
     build_quantity: Mapped[int | None] = mapped_column(Integer)
+    card_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_cards.id", ondelete="SET NULL")
+    )
+    batch_label: Mapped[str | None] = mapped_column(String(80))
     include_east_pricing: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )

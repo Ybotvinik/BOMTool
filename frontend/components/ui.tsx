@@ -72,18 +72,26 @@ export function Kpi({
 }
 
 const statusStyles: Record<string, string> = {
+  NEW: "bg-sky-50 text-sky-700 border-sky-200",
+  ACTIVE: "bg-green-50 text-risk-low border-green-200",
+  DONE: "bg-slate-100 text-slate-500 border-slate-200",
   Active: "bg-green-50 text-risk-low border-green-200",
   "In Review": "bg-amber-50 text-amber-700 border-amber-200",
   Quoting: "bg-brand-soft text-brand border-brand/30",
   Archived: "bg-slate-100 text-slate-500 border-slate-200",
+  Draft: "bg-slate-50 text-slate-600 border-slate-200",
 };
 
 export function StatusBadge({ status }: { status: string }) {
   const labelHe: Record<string, string> = {
+    NEW: "חדש",
+    ACTIVE: "פעיל",
+    DONE: "הסתיים",
     Active: "פעיל",
     "In Review": "בבדיקה",
     Quoting: "בתמחור",
     Archived: "בארכיון",
+    Draft: "טיוטה",
   };
   return (
     <span

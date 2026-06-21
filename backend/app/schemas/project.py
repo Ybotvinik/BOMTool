@@ -15,9 +15,10 @@ class ProjectBase(BaseModel):
     name: str
     code: str
     build_quantity: int = 1
-    status: str = "Active"
+    status: str = "NEW"
     description: str | None = None
     active_version_id: int | None = None
+    drive_folder_url: str | None = None
 
 
 class ProjectCreate(ProjectBase):
@@ -30,10 +31,11 @@ class ProjectUpdate(BaseModel):
     new_customer: NewCustomer | None = None
     name: str | None = None
     code: str | None = None
-    build_quantity: int | None = Field(default=None, gt=0)
+    build_quantity: int | None = Field(default=None, gt=0)  # legacy; prefer card-level qty
     status: str | None = None
     description: str | None = None
     active_version_id: int | None = None
+    drive_folder_url: str | None = None
 
 
 class ProjectRead(ProjectBase, ORMModel):

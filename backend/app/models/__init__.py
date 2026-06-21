@@ -7,6 +7,7 @@ Alembic autogenerate and ``create_all`` can see the full schema.
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.project import Project
+from app.models.project_card import ProjectCard
 from app.models.bom_version import BomVersion
 from app.models.bom_line import BomLine
 from app.models.bom_line_override import BomLineOverride
@@ -33,6 +34,7 @@ __all__ = [
     "User",
     "Customer",
     "Project",
+    "ProjectCard",
     "BomVersion",
     "BomLine",
     "BomLineOverride",

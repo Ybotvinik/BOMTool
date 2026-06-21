@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from app.models import (
     PricingLine,
     PricingSnapshot,
     Project,
+    ProjectCard,
     ProjectFile,
     SupplierQuote,
     SupplierQuoteLine,
@@ -28,7 +29,12 @@ from app.services.suppliers.workbench import get_workbench_results
 router = APIRouter(prefix="/projects", tags=["metrics"])
 
 
-def _compute_metrics(db: Session, project: Project) -> dict:
+def _compute_metrics(
+    db: Session,
+    project: Project,
+    *,
+    version_id: int | None = None,
+) -> dict:
     customer = db.get(Customer, project.customer_id)
     out: dict = {
         "project_id": project.id,
@@ -79,80 +85,106 @@ def _compute_metrics(db: Session, project: Project) -> dict:
         "bom_doc_number": None,
         "bom_board_name": None,
         "bom_version_notes": None,
+        "card_id": None,
+        "card_name": None,
+        "card_build_quantity": None,
+        "batch_label": None,
+        "selected_version_id": None,
+        "batch_build_quantity": None,
     }
 
     version: BomVersion | None = None
-    if project.active_version_id is not None:
+    if version_id is not None:
+        version = db.get(BomVersion, version_id)
+        if version is None or version.project_id != project.id:
+            raise HTTPException(status_code=400, detail="גרסת BOM לא תקינה לפרויקט")
+    elif project.active_version_id is not None:
         version = db.get(BomVersion, project.active_version_id)
-        if version is not None:
-            out["active_bom_version_name"] = version.version_name or version.version_label
-            out["active_bom_version_label"] = version.version_label
-            out["active_bom_is_active"] = version.is_active
-            out["bom_revision_code"] = version.revision_code
-            out["bom_doc_number"] = version.source_doc_number
-            out["bom_board_name"] = version.board_name
-            out["bom_version_notes"] = version.notes
-            out["effective_build_quantity"] = effective_build_quantity(project, version)
-            lines = list(
+    if version is not None:
+        out["selected_version_id"] = version.id
+        out["active_bom_version_id"] = version.id
+        out["active_bom_version_name"] = version.version_name or version.version_label
+        out["active_bom_version_label"] = version.version_label
+        out["active_bom_is_active"] = version.is_active
+        out["bom_revision_code"] = version.revision_code
+        out["bom_doc_number"] = version.source_doc_number
+        out["bom_board_name"] = version.board_name
+        out["bom_version_notes"] = version.notes
+        out["batch_label"] = (
+            version.batch_label or version.version_name or version.version_label
+        )
+        out["batch_build_quantity"] = version.build_quantity
+        card = db.get(ProjectCard, version.card_id) if version.card_id else None
+        if card is not None:
+            out["card_id"] = card.id
+            out["card_name"] = card.name
+            out["card_build_quantity"] = card.build_quantity
+            if not out["bom_board_name"]:
+                out["bom_board_name"] = card.board_name
+        out["effective_build_quantity"] = effective_build_quantity(
+            version, card=card, project=project
+        )
+        out["build_quantity"] = (
+            card.build_quantity if card is not None else project.build_quantity
+        )
+        lines = list(
+            db.scalars(select(BomLine).where(BomLine.bom_version_id == version.id))
+        )
+        summary = compute_quality_summary(lines)
+        out["bom_total_lines"] = summary["total_lines"]
+        out["bom_dnp_count"] = summary["dnp_count"]
+        out["bom_non_dnp_lines"] = max(0, summary["total_lines"] - summary["dnp_count"])
+        out["bom_ok_count"] = summary["ok_count"]
+        out["bom_quality_score"] = summary["quality_score"] if lines else None
+        out["bom_needs_review_count"] = summary["needs_review_count"]
+        out["bom_error_count"] = summary["error_count"]
+        out["bom_warning_count"] = summary["warning_count"]
+
+        try:
+            wb = get_workbench_results(
+                db, project_id=project.id, bom_version_id=version.id
+            )
+            ws = wb.get("summary") or {}
+            out["official_selected_total"] = ws.get("selected_total_cost")
+            out["official_has_solution"] = ws.get("has_solution", 0)
+            out["official_needs_approval"] = ws.get("needs_approval", 0)
+            out["official_no_solution"] = ws.get("no_solution", 0)
+            out["official_dnp"] = ws.get("dnp", 0)
+            wb_lines = wb.get("lines") or []
+            out["official_priced_lines"] = sum(
+                1 for ln in wb_lines if ln.get("unit_price") is not None
+            )
+            out["official_no_stock_count"] = sum(
+                1 for ln in wb_lines if ln.get("status") == "No Stock"
+            )
+            out["official_missing_prices"] = ws.get("no_solution", 0)
+        except Exception:  # noqa: BLE001
+            pass
+
+        official_snap = db.scalar(
+            select(OfficialPriceSnapshot)
+            .where(
+                OfficialPriceSnapshot.project_id == project.id,
+                OfficialPriceSnapshot.bom_version_id == version.id,
+            )
+            .order_by(desc(OfficialPriceSnapshot.created_at))
+        )
+        if official_snap is not None:
+            out["official_snapshot_id"] = official_snap.id
+            out["official_snapshot_name"] = official_snap.snapshot_name
+            out["official_snapshot_created_at"] = (
+                official_snap.created_at.isoformat() if official_snap.created_at else None
+            )
+            snap_lines = list(
                 db.scalars(
-                    select(BomLine).where(BomLine.bom_version_id == version.id)
-                )
-            )
-            summary = compute_quality_summary(lines)
-            out["bom_total_lines"] = summary["total_lines"]
-            out["bom_dnp_count"] = summary["dnp_count"]
-            out["bom_non_dnp_lines"] = max(0, summary["total_lines"] - summary["dnp_count"])
-            out["bom_ok_count"] = summary["ok_count"]
-            out["bom_quality_score"] = summary["quality_score"] if lines else None
-            out["bom_needs_review_count"] = summary["needs_review_count"]
-            out["bom_error_count"] = summary["error_count"]
-            out["bom_warning_count"] = summary["warning_count"]
-
-            try:
-                wb = get_workbench_results(
-                    db, project_id=project.id, bom_version_id=version.id
-                )
-                ws = wb.get("summary") or {}
-                out["official_selected_total"] = ws.get("selected_total_cost")
-                out["official_has_solution"] = ws.get("has_solution", 0)
-                out["official_needs_approval"] = ws.get("needs_approval", 0)
-                out["official_no_solution"] = ws.get("no_solution", 0)
-                out["official_dnp"] = ws.get("dnp", 0)
-                wb_lines = wb.get("lines") or []
-                out["official_priced_lines"] = sum(
-                    1 for ln in wb_lines if ln.get("unit_price") is not None
-                )
-                out["official_no_stock_count"] = sum(
-                    1 for ln in wb_lines if ln.get("status") == "No Stock"
-                )
-                out["official_missing_prices"] = ws.get("no_solution", 0)
-            except Exception:  # noqa: BLE001
-                pass
-
-            official_snap = db.scalar(
-                select(OfficialPriceSnapshot)
-                .where(
-                    OfficialPriceSnapshot.project_id == project.id,
-                    OfficialPriceSnapshot.bom_version_id == version.id,
-                )
-                .order_by(desc(OfficialPriceSnapshot.created_at))
-            )
-            if official_snap is not None:
-                out["official_snapshot_id"] = official_snap.id
-                out["official_snapshot_name"] = official_snap.snapshot_name
-                out["official_snapshot_created_at"] = (
-                    official_snap.created_at.isoformat() if official_snap.created_at else None
-                )
-                snap_lines = list(
-                    db.scalars(
-                        select(OfficialPriceLine).where(
-                            OfficialPriceLine.snapshot_id == official_snap.id
-                        )
+                    select(OfficialPriceLine).where(
+                        OfficialPriceLine.snapshot_id == official_snap.id
                     )
                 )
-                out["official_snapshot_total"] = float(
-                    sum(float(l.official_extended_price or 0) for l in snap_lines)
-                )
+            )
+            out["official_snapshot_total"] = float(
+                sum(float(l.official_extended_price or 0) for l in snap_lines)
+            )
 
     quote = db.scalar(
         select(SupplierQuote)
@@ -246,8 +278,12 @@ def all_project_metrics(db: Session = Depends(get_db)) -> list[dict]:
 
 
 @router.get("/{project_id}/metrics")
-def project_metrics(project_id: int, db: Session = Depends(get_db)) -> dict:
+def project_metrics(
+    project_id: int,
+    version_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
     project = db.get(Project, project_id)
     if project is None or project.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Project not found")
-    return _compute_metrics(db, project)
+    return _compute_metrics(db, project, version_id=version_id)

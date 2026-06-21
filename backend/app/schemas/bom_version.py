@@ -43,5 +43,7 @@ class BomVersionRead(BomVersionBase, ORMModel):
     revised_date: str | None = None
     bom_type: str | None = None
     build_quantity: int | None = None
+    card_id: int | None = None
+    batch_label: str | None = None
     imported_at: datetime | None = None
     imported_by_user_id: int | None = None

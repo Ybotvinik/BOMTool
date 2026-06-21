@@ -6,12 +6,12 @@ from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user_id
-from app.models import BomLine, BomVersion, Project
+from app.models import BomLine, BomVersion, Project, ProjectCard
 from app.schemas.bom_import import (
     BomImportCommit,
     BomImportResult,
@@ -275,25 +275,64 @@ def commit_bom(
     revision_code = payload.revision_code or md.revision_code
     now = datetime.now(timezone.utc)
 
-    version = BomVersion(
-        project_id=payload.project_id,
-        version_label=final_name,
-        version_name=final_name,
-        revision_code=revision_code,
-        status=payload.status,
-        source=payload.source,
-        source_file_name=payload.file_path.split("/")[-1],
-        source_doc_number=md.doc_number,
-        board_name=md.board_name,
-        revised_date=md.revised_date,
-        build_quantity=project.build_quantity,
-        imported_at=now,
-        imported_by_user_id=user_id,
-        is_active=payload.set_active,
-        created_by_id=user_id,
-    )
-    db.add(version)
-    db.flush()
+    if payload.target_bom_version_id is not None:
+        version = db.get(BomVersion, payload.target_bom_version_id)
+        if version is None or version.project_id != project.id:
+            raise HTTPException(status_code=400, detail="גרסת BOM לא תקינה לפרויקט")
+        card = db.get(ProjectCard, version.card_id) if version.card_id else None
+        import_build_qty = (
+            version.build_quantity
+            or (card.build_quantity if card is not None else None)
+            or project.build_quantity
+        )
+        db.execute(delete(BomLine).where(BomLine.bom_version_id == version.id))
+        version.revision_code = revision_code or version.revision_code
+        version.source = payload.source
+        version.source_file_name = payload.file_path.split("/")[-1]
+        version.source_doc_number = md.doc_number or version.source_doc_number
+        version.board_name = md.board_name or version.board_name or (card.board_name if card else None)
+        version.revised_date = md.revised_date or version.revised_date
+        version.build_quantity = import_build_qty
+        version.imported_at = now
+        version.imported_by_user_id = user_id
+        version.is_active = payload.set_active
+        final_name = version.batch_label or version.version_name or version.version_label
+        conflict = False
+    else:
+        card = None
+        if project.active_version_id is not None:
+            active_ver = db.get(BomVersion, project.active_version_id)
+            if active_ver is not None and active_ver.card_id is not None:
+                card = db.get(ProjectCard, active_ver.card_id)
+        if card is None:
+            card = db.scalar(
+                select(ProjectCard)
+                .where(ProjectCard.project_id == project.id)
+                .order_by(ProjectCard.id)
+                .limit(1)
+            )
+        import_build_qty = card.build_quantity if card is not None else project.build_quantity
+
+        version = BomVersion(
+            project_id=payload.project_id,
+            card_id=card.id if card is not None else None,
+            version_label=final_name,
+            version_name=final_name,
+            revision_code=revision_code,
+            status=payload.status,
+            source=payload.source,
+            source_file_name=payload.file_path.split("/")[-1],
+            source_doc_number=md.doc_number,
+            board_name=md.board_name or (card.board_name if card else None),
+            revised_date=md.revised_date,
+            build_quantity=import_build_qty,
+            imported_at=now,
+            imported_by_user_id=user_id,
+            is_active=payload.set_active,
+            created_by_id=user_id,
+        )
+        db.add(version)
+        db.flush()
 
     line_count = 0
     skipped = 0
@@ -337,7 +376,7 @@ def commit_bom(
                 manufacturer=cell(row, "manufacturer") or None,
                 description=cell(row, "description") or None,
                 quantity=qty if qty is not None else Decimal(0),
-                required_qty=compute_required_qty(qty, project.build_quantity, is_dnp),
+                required_qty=compute_required_qty(qty, import_build_qty, is_dnp),
                 reference_designators=cell(row, "reference_designators") or None,
                 footprint=cell(row, "footprint") or None,
                 value=cell(row, "value") or None,

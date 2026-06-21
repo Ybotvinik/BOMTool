@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user_id
-from app.models import BomLine, BomVersion
+from app.models import BomLine, BomVersion, Project
 from app.schemas.bom_line import BomLineRead
 from app.schemas.bom_version import (
     BomVersionCreate,
@@ -185,8 +185,25 @@ def delete_bom_version(
     version = db.get(BomVersion, version_id)
     if version is None:
         raise HTTPException(status_code=404, detail="BOM version not found")
-    label, project_id = version.version_label, version.project_id
+
+    project = db.get(Project, version.project_id)
+    label = version.batch_label or version.version_name or version.version_label
+    project_id = version.project_id
+    was_active = project is not None and project.active_version_id == version.id
+
     db.delete(version)
+    db.flush()
+
+    if project is not None and was_active:
+        replacement = db.scalar(
+            select(BomVersion)
+            .where(BomVersion.project_id == project.id)
+            .order_by(BomVersion.id.desc())
+        )
+        project.active_version_id = replacement.id if replacement else None
+        if replacement is not None:
+            replacement.is_active = True
+
     db.commit()
     log_activity(
         db,

@@ -13,6 +13,7 @@ from app.routers import (
     metrics,
     official_pricing,
     pricing,
+    project_cards,
     projects,
     users,
 )
@@ -47,6 +48,7 @@ app.include_router(customers.router, prefix=api)
 # Metrics first so /projects/metrics resolves before /projects/{project_id}.
 app.include_router(metrics.router, prefix=api)
 app.include_router(projects.router, prefix=api)
+app.include_router(project_cards.router, prefix=api)
 app.include_router(bom_versions.router, prefix=api)
 app.include_router(bom_lines.router, prefix=api)
 app.include_router(bom_import.router, prefix=api)

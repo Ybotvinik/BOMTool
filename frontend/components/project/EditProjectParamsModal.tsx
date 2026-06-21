@@ -57,12 +57,12 @@ export function EditProjectParamsModal({
   }, [projectId]);
 
   async function save() {
-    const bq = Number(form.build_quantity);
     if (!form.name.trim()) {
       setErr("שם פרויקט נדרש");
       return;
     }
-    if (!Number.isFinite(bq) || bq <= 0) {
+    const bq = Number(form.build_quantity);
+    if (versionId != null && (!Number.isFinite(bq) || bq <= 0)) {
       setErr("כמות להרכבה חייבת להיות מספר חיובי");
       return;
     }
@@ -74,7 +74,6 @@ export function EditProjectParamsModal({
         {
           name: form.name.trim(),
           customer_id: form.customer_id === "" ? undefined : form.customer_id,
-          build_quantity: bq,
           status: form.status,
           description: form.description.trim() || null,
           active_version_id:
@@ -85,13 +84,14 @@ export function EditProjectParamsModal({
       if (versionId != null) {
         const targetVid =
           form.active_version_id === "" ? versionId : Number(form.active_version_id);
+        const bq = Number(form.build_quantity);
         await apiPatch(
           `/api/bom-versions/${targetVid}`,
           {
             board_name: form.board_name.trim() || null,
             source_doc_number: form.source_doc_number.trim() || null,
             revision_code: form.revision_code.trim() || null,
-            build_quantity: bq,
+            build_quantity: Number.isFinite(bq) && bq > 0 ? bq : undefined,
             notes: form.version_notes.trim() || null,
           },
           user.id,
@@ -115,8 +115,7 @@ export function EditProjectParamsModal({
         <div className="px-4 py-3 border-b border-slate-200 shrink-0">
           <h2 className="text-[15px] font-bold text-navy">עריכת פרמטרים</h2>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            כמות להרכבה משמשת כמכפיל לחישוב Required Qty — לא משנה את Qty המקורי של
-            כל שורת BOM
+            כמות להרכבה מוגדרת ברמת כרטיס/מנה — כאן ניתן לעדכן את כמות המנה הפעילה
           </p>
         </div>
         <div className="p-4 space-y-3 overflow-auto flex-1">
@@ -152,26 +151,30 @@ export function EditProjectParamsModal({
             </select>
           </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="כמות להרכבה / Build Quantity">
-              <input
-                type="number"
-                min={1}
-                className={inp}
-                value={form.build_quantity}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, build_quantity: e.target.value }))
-                }
-              />
-            </Field>
+            {versionId != null ? (
+              <Field label="כמות להרכבה (מנה פעילה)">
+                <input
+                  type="number"
+                  min={1}
+                  className={inp}
+                  value={form.build_quantity}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, build_quantity: e.target.value }))
+                  }
+                />
+              </Field>
+            ) : (
+              <div />
+            )}
             <Field label="סטטוס פרויקט">
               <select
                 className={inp}
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
               >
-                {["Active", "In Review", "Quoting", "Archived"].map((s) => (
+                {["NEW", "ACTIVE", "DONE"].map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {s === "NEW" ? "חדש" : s === "ACTIVE" ? "פעיל" : "הסתיים"}
                   </option>
                 ))}
               </select>
