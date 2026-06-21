@@ -24,11 +24,13 @@ class Settings(BaseSettings):
     file_storage_backend: str = "local"
     local_storage_dir: str = "/data/uploads"
 
-    # Official supplier API credentials (Digi-Key, Mouser).
+    # Official supplier API credentials (Digi-Key, Mouser, TI).
     digikey_client_id: str = ""
     digikey_client_secret: str = ""
     digikey_env: str = "sandbox"
     mouser_api_key: str = ""
+    ti_client_id: str = ""
+    ti_client_secret: str = ""
     supplier_api_timeout_seconds: int = 20
     supplier_api_max_retries: int = 2
     supplier_api_mock: bool = False
@@ -41,6 +43,10 @@ class Settings(BaseSettings):
     @property
     def mouser_configured(self) -> bool:
         return bool(self.mouser_api_key.strip())
+
+    @property
+    def ti_configured(self) -> bool:
+        return bool(self.ti_client_id.strip() and self.ti_client_secret.strip())
 
     @property
     def digikey_api_base(self) -> str:

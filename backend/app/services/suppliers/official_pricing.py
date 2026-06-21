@@ -23,9 +23,11 @@ from app.models import (
 from app.services.activity import log_activity
 from app.services.bom_quality import compute_required_qty
 from app.services.suppliers.base import (
+    OFFICIAL_API_SUPPLIERS,
     SUPPLIER_DIGIKEY,
     SUPPLIER_DISPLAY_NAMES,
     SUPPLIER_MOUSER,
+    SUPPLIER_TI,
     SupplierApiError,
     SupplierPriceResult,
     normalize_mpn,
@@ -39,6 +41,7 @@ from app.services.suppliers.pricing_store import (
 )
 from app.services.suppliers.digikey import DigiKeyClient
 from app.services.suppliers.mouser import MouserClient
+from app.services.suppliers.ti import TIClient
 from app.services.suppliers.workbench import (
     _overrides_by_line,
     _search_mpn_for_line,
@@ -75,6 +78,7 @@ def supplier_config_status(settings: Settings | None = None) -> dict:
             "env": settings.digikey_env,
         },
         "mouser": _supplier_block(settings.mouser_configured),
+        "ti": _supplier_block(settings.ti_configured),
         "mock_mode": mock,
         "mock_allow_export": settings.supplier_api_mock_allow_export,
     }
@@ -89,7 +93,7 @@ def test_supplier_search(
 ) -> dict:
     """Single MPN lookup for debugging — uses real API unless SUPPLIER_API_MOCK=true."""
     settings = settings or get_settings()
-    if supplier not in (SUPPLIER_DIGIKEY, SUPPLIER_MOUSER):
+    if supplier not in OFFICIAL_API_SUPPLIERS:
         raise ValueError(f"Unknown supplier: {supplier}")
 
     if not settings.supplier_api_mock:
@@ -114,6 +118,8 @@ def _client_for_supplier(supplier: str, settings: Settings):
         return DigiKeyClient(settings)
     if supplier == SUPPLIER_MOUSER:
         return MouserClient(settings)
+    if supplier == SUPPLIER_TI:
+        return TIClient(settings)
     raise ValueError(f"Unknown supplier: {supplier}")
 
 
@@ -179,7 +185,7 @@ def fetch_official_pricing(
     if version is None or version.project_id != project_id:
         raise ValueError("BOM version not found")
 
-    valid_suppliers = [s for s in suppliers if s in (SUPPLIER_DIGIKEY, SUPPLIER_MOUSER)]
+    valid_suppliers = [s for s in suppliers if s in OFFICIAL_API_SUPPLIERS]
     if not valid_suppliers:
         raise ValueError("No valid suppliers selected")
 
@@ -408,6 +414,7 @@ def get_official_results(
     for bl in bom_lines:
         dk = results_map.get((bl.id, SUPPLIER_DIGIKEY))
         ms = results_map.get((bl.id, SUPPLIER_MOUSER))
+        ti = results_map.get((bl.id, SUPPLIER_TI))
         rows.append(
             {
                 "bom_line_id": bl.id,
@@ -419,7 +426,8 @@ def get_official_results(
                 "dnp": _is_dnp_line(bl),
                 "digikey": _result_to_dict(dk),
                 "mouser": _result_to_dict(ms),
-                "selected_official_source": _pick_display_source(dk, ms),
+                "ti": _result_to_dict(ti),
+                "selected_official_source": _pick_display_source(dk, ms, ti),
             }
         )
     return rows
@@ -442,8 +450,9 @@ def _result_to_dict(row: OfficialSupplierPriceResult | None) -> dict | None:
 def _pick_display_source(
     dk: OfficialSupplierPriceResult | None,
     ms: OfficialSupplierPriceResult | None,
+    ti: OfficialSupplierPriceResult | None,
 ) -> str | None:
-    best = _choose_best_result([dk, ms], DEFAULT_SUPPLIER_PRIORITY)
+    best = _choose_best_result([dk, ms, ti], DEFAULT_SUPPLIER_PRIORITY)
     if best is None:
         return None
     return SUPPLIER_DISPLAY_NAMES.get(best.supplier, best.supplier)

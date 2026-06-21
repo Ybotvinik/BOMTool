@@ -12,6 +12,7 @@ from app.schemas.common import ORMModel
 class SupplierConfigStatus(BaseModel):
     digikey: dict
     mouser: dict
+    ti: dict
     mock_mode: bool
     mock_allow_export: bool
 
@@ -45,7 +46,7 @@ class SupplierTestResponse(BaseModel):
 class OfficialPricingFetchRequest(BaseModel):
     project_id: int
     bom_version_id: int
-    suppliers: list[str] = Field(default_factory=lambda: ["digikey", "mouser"])
+    suppliers: list[str] = Field(default_factory=lambda: ["digikey", "mouser", "ti"])
     mode: str = "all"  # missing_only | all
 
 
@@ -78,6 +79,7 @@ class OfficialPricingLineResult(BaseModel):
     dnp: bool
     digikey: SupplierResultCell | None = None
     mouser: SupplierResultCell | None = None
+    ti: SupplierResultCell | None = None
     selected_official_source: str | None = None
 
 
@@ -265,7 +267,7 @@ class FetchLineRequest(BaseModel):
     project_id: int
     bom_version_id: int
     bom_line_id: int
-    suppliers: list[str] = Field(default_factory=lambda: ["digikey", "mouser"])
+    suppliers: list[str] = Field(default_factory=lambda: ["digikey", "mouser", "ti"])
 
 
 class WorkbenchExportRequest(BaseModel):
@@ -284,7 +286,7 @@ class OfficialSnapshotCreateRequest(BaseModel):
     project_id: int
     bom_version_id: int
     snapshot_name: str
-    supplier_priority: list[str] = Field(default_factory=lambda: ["digikey", "mouser"])
+    supplier_priority: list[str] = Field(default_factory=lambda: ["digikey", "mouser", "ti"])
 
 
 class OfficialSnapshotCreateResponse(BaseModel):

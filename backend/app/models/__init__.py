@@ -23,6 +23,11 @@ from app.models.official_pricing import (
     OfficialSupplierQuery,
 )
 from app.models.activity_log import ActivityLog
+from app.models.component_lookup import (
+    ComponentPriceLookup,
+    ComponentPriceLookupAddition,
+    ComponentPriceLookupResult,
+)
 
 __all__ = [
     "User",
@@ -45,4 +50,7 @@ __all__ = [
     "OfficialPriceSnapshot",
     "OfficialPriceLine",
     "OfficialPricingLineOverride",
+    "ComponentPriceLookup",
+    "ComponentPriceLookupResult",
+    "ComponentPriceLookupAddition",
 ]

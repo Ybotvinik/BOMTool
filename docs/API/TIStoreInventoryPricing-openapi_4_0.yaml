@@ -1,0 +1,556 @@
+openapi: 3.0.3
+info:
+  title: TI store inventory and pricing API
+  description: APIs for retrieving TI store catalog information, including pricing (for all available currencies on TI.com), available stock, and order limits. See the full list of <a href="https://e2e.ti.com/search?q=error inventory&category=forum&group=453_452&faq=true&sort=date%20asc">error codes and detail descriptions</a>.
+  version: 2.0.0
+  contact:
+    name: API Support
+    url: https://api-portal.ti.com/support
+servers:
+  - url: 'https://transact.ti.com/v2'
+    description: External Production API Gateway
+
+security:
+  - OAuth2: []
+tags:
+  - name: Product inventory
+paths:
+  '/store/products/{tiPartNumber}':
+    parameters:
+      - name: tiPartNumber
+        in: path
+        description: >-
+          A URL encoded unique identifier for the product (Orderable Part Number).
+
+          Note: Part numbers that include /NOPB must be encoded prior to making the API call or the response will be a “not found” error. For example, LP2982AIM5-3.3/NOPB must be encoded as LP2982AIM5-3.3%2FNOPB. Make sure the encoding process does not have linefeed or new line breaks, such as LP2989IM-2.5%2FNOPB%0A%0A as this too will result in a product “not found” error.
+        required: true
+        schema:
+          type: string
+          example: AFE7799IABJ
+    get:
+      description: >-
+        Get information for a specific product by its OPN (Orderable Part Number)
+      tags:
+        - Product inventory
+      operationId: getProductInformation
+      security:
+        - OAuth2: []
+      parameters:
+        - $ref: '#/components/parameters/currencyParameter'
+        - $ref: '#/components/parameters/excludeEVMsParameter'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  '/store/products':
+    get:
+      description: >-
+        Get pageable list of TI store products
+      tags:
+        - Product inventory
+      operationId: getProductList
+      security:
+        - OAuth2: []
+      parameters:
+        - name: gpn
+          in: query
+          description: >-
+            Generic part number of one or more child products (also referred to as the base part number).
+          required: true
+          schema:
+            type: string
+            example: AFE7799
+        - $ref: '#/components/parameters/currencyParameter'
+        - $ref: '#/components/parameters/excludeEVMsParameter'
+        - $ref: '#/components/parameters/pageParameter'
+        - $ref: '#/components/parameters/sizeParameter'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+        '400':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  '/store/products/catalog':
+    get:
+      description: >-
+        Retrieve the full catalog of parts available to purchase from the TI store.
+      tags:
+        - Product inventory
+      operationId: getProductCatalog
+      security:
+        - OAuth2: []
+      parameters:
+        - $ref: '#/components/parameters/currencyParameter'
+        - $ref: '#/components/parameters/excludeEVMsParameter'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductCatalog'
+        '400':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  securitySchemes:
+    OAuth2:
+      type: 'oauth2'
+      description: >-
+        This API uses OAuth 2 with Client Credentials. See https://api-portal.ti.com/order-api-authentication
+      flows:
+        clientCredentials:
+          refreshUrl: 'https://transact.ti.com/v1/oauth'
+          tokenUrl : 'https://transact.ti.com/v1/oauth'
+          scopes: {}
+  parameters:
+    currencyParameter:
+      name: currency
+      in: query
+      description: >-
+        Specific currency for pricing information. Specify the currency using ISO 4217 alphabetic codes. If not specified, pricing in USD will be provided.
+      required: false
+      schema:
+        type: string
+        default: "USD"
+        example: "USD"
+    excludeEVMsParameter:
+      name: exclude-evms
+      in: query
+      description: >-
+        Flag to exclude EVM (Evaluation Module) products from the result.  If not specified, EVMs are included.
+      required: false
+      schema:
+        type: boolean
+        default: false
+        example: true
+    pageParameter:
+      name: page
+      in: query
+      description: >-
+        The index of the page (starting at 0) to be returned from this request
+      required: true
+      schema:
+        type: integer
+        format: int32
+        default: 0
+        example: 0
+    sizeParameter:
+      name: size
+      in: query
+      description: >-
+        The page size between 1 and 100 to be returned
+      required: true
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+        example: 20
+  responses:
+    UnprocessableEntity:
+      description: 422 Unprocessable Entity
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: ERR-TICOM-INV-API-1001
+                type: Validation
+                section: QueryParameter
+                field: page
+                reason: Invalid page
+                message: "page must be greater than or equal to 0"
+              - errorCode: ERR-TICOM-INV-API-1001
+                type: Validation
+                section: QueryParameter
+                field: size
+                reason: Invalid size
+                message: "size must be between 1 and 100"
+    Unauthorized:
+      description: 401 Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: ERR-TICOM-INV-API-1004
+                type: Security
+                reason: "Invalid Credentials"
+                message: "Provide a valid Bearer token"
+    Forbidden:
+      description: 403 Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: ERR-TICOM-INV-API-1004
+                type: Security
+                reason: "Invalid Credentials"
+                message: "Provide a valid Bearer token"
+    NotFound:
+      description: 404 Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: ERR-TICOM-INV-API-1002
+                type: ResourceNotFound
+                section: Path
+                field: tiPartNumber
+                reason: "Resource could not be found"
+                message: "Product not found for 'DOESNOTEXIST'"
+    MethodNotAllowed:
+      description: 405 Method Not Allowed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: TI-API-00356
+                type: Validation
+                reason: Invalid method
+                message: "PATCH is not a supported method."
+    TooManyRequests:
+      description: 429 Too Many Requests
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: TI-API-00235
+                type: Security
+                reason: Too many requests
+                message: Rate Limit Quota Hit.
+    InternalServerError:
+      description: 500 Internal Server Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            errors:
+              - errorCode: TI-API-00556
+                type: Unknown
+                reason: Service unavailable
+                message: This service is temporarily unavailable. Please contact support.
+  schemas:
+    Error:
+      title: Error
+      description: >-
+        Standard error response
+      type: object
+      properties:
+        errors:
+          type: array
+          description: >-
+            Error messages
+          items:
+            type: object
+            properties:
+              errorCode:
+                type: string
+                description: >-
+                  Unique code for the error returned.
+                example: "ERR-TICOM-INV-API-1001"
+              type:
+                type: string
+                description: >-
+                  Classification of the error.
+                example: Validation
+              section:
+                type: string
+                description: >-
+                  Used primarily for validation errors. Provides the section of the request where the violating field can be found.
+                example: "InventorySubscription"
+              field:
+                type: string
+                description: >-
+                  The name of the field that failed validation, if applicable.
+                example: "tiPartNumber"
+              reason:
+                type: string
+                description: >-
+                  The reason for the error. Details why the request was rejected.
+                example: >-
+                  Invalid tiPartNumber.
+              message:
+                type: string
+                description: >-
+                  Details of the specific error and the actions to take to resolve. For validation errors, this will include details such as the value that was invalid as well as the constraints.
+                example: >-
+                  tiPartNumber 'DOESNOTEXIST' is not a valid product. Please provide a valid tiPartNumber.
+    FutureInventory:
+      type: object
+      properties:
+        forecastQuantity:
+          type: integer
+          description: >-
+            The estimated inventory quantity that will become available. The value can be null if estimated quantity is unknown.
+          format: int32
+        forecastDate:
+          type: string
+          description: >-
+            The estimated week of availability.(UTC, YYYY-MM-DD)
+          example: "2023-10-11"
+          format: date
+    Product:
+      title: Product
+      description: Product attributes
+      type: object
+      properties:
+        tiPartNumber:
+          type: string
+          description: >-
+            The unique identifier of the product (the orderable part number).
+          example: "AFE7799IABJ"
+        genericPartNumber:
+          type: string
+          description: >-
+            The generic part number of the product (also referred to as the base part number).
+          example: "AFE7799"
+        buyNowUrl:
+          type: string
+          description: >-
+            The URL to purchase the product in the TI store.
+          example: "https://www.ti.com/product/AFE7799/part-details/AFE7799IABJ"
+        quantity:
+          type: integer
+          description: >-
+            The inventory quantity currently on hand for sale in the TI store.
+          format: int32
+          example: 5435
+        limit:
+          type: integer
+          description: >-
+            The order limit on TI.com store, if a limit exists.
+          example: 50
+        pricing:
+          type: array
+          description: >-
+            Price break information by currency.
+          items:
+            $ref: '#/components/schemas/Pricing'
+        futureInventory:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/FutureInventory'
+          example:
+            - forecastQuantity: 3500
+              forecastDate: "2023-06-04"
+            - forecastQuantity: 5000
+              forecastDate: "2023-06-11"
+            - forecastQuantity: 2000
+              forecastDate: "2023-06-18"
+        description:
+          type: string
+          description: >-
+            The description of the product
+          example: "8-Bit 200MSPS Low-Power Analog-to-Digital Converter (ADC) With Internal Sample and Hold"
+        minimumOrderQuantity:
+          type: integer
+          description: >-
+            The minimum order quantity (MOQ) of the product for the TI store
+          format: int32
+          example: 1
+        standardPackQuantity:
+          type: integer
+          description: >-
+            The standard package quantity (SPQ) of the product
+          format: int32
+          example: 126
+        exportControlClassificationNumber:
+          type: string
+          description: >-
+            The Export Control Classification Number (ECCN) for the product
+          example: "EAR99"
+        htsCode:
+          type: string
+          description: >-
+            The 10-digit Harmornized Tariff Schedule Code for the product
+          example: "8542390001"
+        pinCount:
+          type: integer
+          description: >-
+            The pin count of the product
+          format: int32
+          example: 5
+        packageType:
+          type: string
+          description: >-
+            The package type of the product
+          example: "SOT-23 (DBV)"
+        packageCarrier:
+          type: string
+          description: >-
+            The carrier type for the product
+          example: "Large T&R"
+        customReel:
+          type: boolean
+          description: >-
+            Indicates whether or not a custom reel carrier is available.
+          example: true
+        lifeCycle:
+          type: string
+          description: >-
+            The product lifecycle status
+          example: "ACTIVE"
+    Pricing:
+      title: Pricing
+      description: Price breaks by quantity
+      type: object
+      properties:
+        currency:
+          type: string
+          description: >-
+            Pricing currency ISO 4217 code
+          example: "USD"
+        priceBreaks:
+          type: array
+          description: >-
+            Price breaks
+          items:
+            type: object
+            properties:
+              priceBreakQuantity:
+                type: integer
+                description: >-
+                  Price break quantity
+                format: int32
+              price:
+                type: number
+                description: >-
+                  The corresponding price for the price break quantity
+          example:
+            - priceBreakQuantity: 1
+              price: 2.03
+            - priceBreakQuantity: 10
+              price: 1.43
+            - priceBreakQuantity: 25
+              price: 1.35
+            - priceBreakQuantity: 100
+              price: 1.10
+            - priceBreakQuantity: 200
+              price: 1.00
+            - priceBreakQuantity: 350
+              price: 0.95
+            - priceBreakQuantity: 600
+              price: 0.90
+            - priceBreakQuantity: 750
+              price: 0.85
+    ProductCatalog:
+      title: ProductCatalog
+      description: >-
+        A full list of orderable part numbers.
+      type: object
+      properties:
+        catalog:
+          type: array
+          description: Part list
+          items:
+            $ref: '#/components/schemas/Product'
+    ProductPage:
+      title: Page<Product>
+      description: >-
+        Pageable Product list response
+      type: object
+      properties:
+        content:
+          type: array
+          description: >-
+            The list of products in the requested page
+          items:
+            $ref: '#/components/schemas/Product'
+        first:
+          type: boolean
+          description: >-
+            Indicates if the returned page is the first page of the matching result set
+          example: true
+        last:
+          type: boolean
+          description: >-
+            Indicates if the returned page is the last page of the matching result set
+          example: false
+        number:
+          type: integer
+          description: >-
+            The page number that is returned. This value will match the Page request parameter specified in the request.
+          format: int32
+          example: 0
+        numberOfElements:
+          type: integer
+          description: >-
+            The number of elements in the current page
+          format: int32
+          example: 1
+        size:
+          type: integer
+          description: >-
+            The size of the page. This value will match the Size request parameter specified in the request.
+          format: int32
+          example: 10
+        totalElements:
+          type: integer
+          description: >-
+            The total number of products in the result set (not limited to the current page)
+          format: int64
+          example: 1
+        totalPages:
+          type: integer
+          description: >-
+            The total number of pages in the result set based on the specified page size
+          format: int32
+          example: 1

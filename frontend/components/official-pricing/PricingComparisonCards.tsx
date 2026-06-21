@@ -89,7 +89,7 @@ export function PricingComparisonCards({
         <div className="flex items-start justify-between gap-1">
           <div className="min-w-0">
             <p className="text-[12px] font-bold text-navy leading-tight">מחיר רשמי בלבד</p>
-            <p className="text-[8.5px] text-slate-500 mt-0.5 truncate">Digi-Key / Mouser / Manual</p>
+            <p className="text-[8.5px] text-slate-500 mt-0.5 truncate">Digi-Key / Mouser / TI / Manual</p>
           </div>
           {!activeModeEast && (
             <span className="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-brand text-white font-medium">

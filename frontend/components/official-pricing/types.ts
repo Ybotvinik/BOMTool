@@ -103,6 +103,7 @@ export type WorkbenchSummary = {
 export type ConfigStatus = {
   digikey: { configured: boolean; credentials_missing: boolean; env: string; mode: string };
   mouser: { configured: boolean; credentials_missing: boolean; mode: string };
+  ti: { configured: boolean; credentials_missing: boolean; mode: string };
   mock_mode: boolean;
   mock_allow_export: boolean;
 };
@@ -128,7 +129,24 @@ export function matchesFilter(line: WorkbenchLine, filter: FilterKey): boolean {
   return true;
 }
 
+function priceFractionDigits(v: number): number {
+  const abs = Math.abs(v);
+  if (abs === 0) return 2;
+  let digits = 2;
+  while (digits < 8) {
+    if (Math.round(abs * 10 ** digits) !== 0) return digits;
+    digits += 1;
+  }
+  return 8;
+}
+
 export function fmtPrice(v: number | null | undefined, currency = "USD") {
   if (v == null) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(v);
+  const fractionDigits = priceFractionDigits(v);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(v);
 }

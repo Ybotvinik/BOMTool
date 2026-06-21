@@ -9,6 +9,7 @@ import {
   Lock,
   ShieldCheck,
   AlertTriangle,
+  ShoppingCart,
 } from "lucide-react";
 import { Card, PageHeader, Badge } from "@/components/ui";
 import { apiDownloadPost, apiGet, triggerBlobDownload } from "@/lib/api";
@@ -20,20 +21,101 @@ type ApiVersion = {
   version_label: string;
   version_name: string | null;
   is_active: boolean;
+  include_east_pricing?: boolean;
 };
 type ApiSnapshot = {
   id: number;
   name: string;
   snapshot_name: string | null;
 };
+type WorkbenchPeek = {
+  summary?: { total_lines?: number; has_solution?: number };
+  include_east_pricing?: boolean;
+};
 
 const CUSTOMER_CHECKLIST = [
-  "ללא נתוני China Quote",
+  "ללא Link / מזרח / China",
   "ללא עלות פנימית",
-  "ללא מרווח ספק",
-  "ללא הערות פנימיות",
+  "ללא Margin / Savings",
   "ללא Match Confidence",
+  "ללא הערות פנימיות",
 ];
+
+const PURCHASE_SUPPLIER_FILTERS = [
+  { value: "all", label: "כל הספקים" },
+  { value: "link", label: "Link" },
+  { value: "east", label: "East" },
+  { value: "digikey", label: "Digi-Key" },
+  { value: "mouser", label: "Mouser" },
+  { value: "ti", label: "TI" },
+  { value: "manual", label: "Manual" },
+  { value: "tbd", label: "TBD / No Solution" },
+] as const;
+
+const PRICING_MODES = [
+  { value: false, label: "רשמי בלבד" },
+  { value: true, label: "משולב עם מחירי מזרח" },
+] as const;
+
+function ExportCard({
+  title,
+  description,
+  warning,
+  disabled,
+  disabledReason,
+  busy,
+  busyKey,
+  exportKey,
+  onExport,
+  buttonClassName = "inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50 disabled:opacity-60",
+  iconSize = "h-7 w-7",
+}: {
+  title: string;
+  description: string;
+  warning?: string;
+  disabled: boolean;
+  disabledReason?: string;
+  busy: string | null;
+  busyKey: string;
+  exportKey: string;
+  onExport: () => void;
+  buttonClassName?: string;
+  iconSize?: string;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-start gap-3 mb-2">
+        <FileSpreadsheet className={`${iconSize} text-brand shrink-0`} />
+        <div>
+          <div className="text-[13px] font-semibold">{title}</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">{description}</div>
+        </div>
+      </div>
+      {warning && (
+        <div className="flex items-center gap-1.5 text-[11px] text-amber-800 mb-3">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          {warning}
+        </div>
+      )}
+      {disabled && disabledReason && (
+        <p className="text-[11px] text-slate-500 mb-2">{disabledReason}</p>
+      )}
+      <button
+        type="button"
+        disabled={disabled || busy != null}
+        onClick={onExport}
+        className={buttonClassName}
+      >
+        {busy === busyKey ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Download className="h-3.5 w-3.5" />
+        )}
+        הורד Excel
+      </button>
+    </Card>
+  );
+}
 
 function ExportInner() {
   const urlParams = useSearchParams();
@@ -44,9 +126,13 @@ function ExportInner() {
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [versions, setVersions] = useState<ApiVersion[]>([]);
   const [snapshots, setSnapshots] = useState<ApiSnapshot[]>([]);
+  const [workbench, setWorkbench] = useState<WorkbenchPeek | null>(null);
+  const [workbenchLoading, setWorkbenchLoading] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [versionId, setVersionId] = useState("");
   const [snapshotId, setSnapshotId] = useState("");
+  const [purchaseSupplier, setPurchaseSupplier] = useState("all");
+  const [pricingIncludeEast, setPricingIncludeEast] = useState<boolean | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,6 +155,7 @@ function ExportInner() {
       setSnapshots([]);
       setVersionId("");
       setSnapshotId("");
+      setWorkbench(null);
       return;
     }
     const pid = Number(projectId);
@@ -100,10 +187,35 @@ function ExportInner() {
       .catch(() => setError("לא ניתן לטעון גרסאות / נציגי מחיר"));
   }, [projectId, urlBomVersionId, urlPricingSnapshotId]);
 
+  const pid = projectId ? Number(projectId) : null;
+  const vid = versionId ? Number(versionId) : null;
+  const selectedProject = projects.find((p) => p.id === pid);
+  const selectedVersion = versions.find((v) => v.id === vid);
+
+  useEffect(() => {
+    if (selectedVersion?.include_east_pricing != null) {
+      setPricingIncludeEast(selectedVersion.include_east_pricing);
+    }
+  }, [selectedVersion?.id, selectedVersion?.include_east_pricing]);
+
+  useEffect(() => {
+    if (pid == null || vid == null) {
+      setWorkbench(null);
+      return;
+    }
+    setWorkbenchLoading(true);
+    apiGet<WorkbenchPeek>(
+      `/api/official-pricing/workbench?project_id=${pid}&bom_version_id=${vid}`,
+    )
+      .then(setWorkbench)
+      .catch(() => setWorkbench(null))
+      .finally(() => setWorkbenchLoading(false));
+  }, [pid, vid]);
+
   async function runExport(
     key: string,
     path: string,
-    body: Record<string, number>,
+    body: Record<string, unknown>,
   ) {
     setBusy(key);
     setError(null);
@@ -117,17 +229,32 @@ function ExportInner() {
     }
   }
 
-  const pid = projectId ? Number(projectId) : null;
-  const vid = versionId ? Number(versionId) : null;
-  const sid = snapshotId ? Number(snapshotId) : null;
   const canBomExport = pid != null && vid != null;
-  const canPricingExport = pid != null && sid != null;
+  const hasPricingData =
+    canBomExport &&
+    !workbenchLoading &&
+    (workbench?.summary?.total_lines ?? 0) > 0;
+  const hasQualityData = canBomExport;
+  const eastForPricing =
+    pricingIncludeEast ?? selectedVersion?.include_east_pricing ?? true;
+  const includeEastForPurchase =
+    selectedVersion?.include_east_pricing ?? workbench?.include_east_pricing ?? true;
+
+  const pricingDisabledReason = !canBomExport
+    ? "בחר פרויקט וגרסת BOM"
+    : workbenchLoading
+      ? "טוען נתוני מחיר..."
+      : !hasPricingData
+        ? "אין נתוני מחיר"
+        : undefined;
+
+  const qualityDisabledReason = !canBomExport ? "בחר פרויקט וגרסת BOM" : undefined;
 
   return (
     <>
       <PageHeader
         title="דוחות וייצוא"
-        subtitle="הפקת קבצי Excel — ייצוא ללקוח וייצוא פנימי"
+        subtitle="הפקת קבצי Excel — דוחות ללקוח, פנימיים ורכש"
       />
 
       {error && (
@@ -137,7 +264,7 @@ function ExportInner() {
       )}
 
       <Card className="p-4 mb-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <div>
             <label className="block text-[12px] text-slate-600 mb-1">פרויקט</label>
             <select
@@ -171,14 +298,16 @@ function ExportInner() {
             </select>
           </div>
           <div>
-            <label className="block text-[12px] text-slate-600 mb-1">Pricing Snapshot</label>
+            <label className="block text-[12px] text-slate-600 mb-1">
+              Pricing Snapshot (אופציונלי)
+            </label>
             <select
               value={snapshotId}
               onChange={(e) => setSnapshotId(e.target.value)}
               disabled={!projectId}
               className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white disabled:opacity-60"
             >
-              <option value="">בחר Snapshot</option>
+              <option value="">ללא — משתמש בנתוני Workbench נוכחיים</option>
               {snapshots.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.snapshot_name || s.name}
@@ -187,13 +316,31 @@ function ExportInner() {
             </select>
           </div>
         </div>
+        {selectedProject && selectedVersion && (
+          <div className="text-[11.5px] text-slate-600 border-t border-slate-100 pt-2">
+            נבחר: <span className="font-medium">{selectedProject.name}</span> ·{" "}
+            <span className="font-medium">
+              {selectedVersion.version_name || selectedVersion.version_label}
+            </span>
+            {workbench?.summary?.total_lines != null && (
+              <>
+                {" "}
+                · {workbench.summary.total_lines} שורות BOM
+                {workbench.summary.has_solution != null && (
+                  <> · {workbench.summary.has_solution} עם פתרון מחיר</>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="space-y-6">
+        {/* A. Customer */}
         <section>
           <div className="flex items-center gap-2 mb-2">
             <ShieldCheck className="h-4 w-4 text-risk-low" />
-            <h2 className="text-[14px] font-semibold">ייצוא ללקוח</h2>
+            <h2 className="text-[14px] font-semibold">דוחות לקוח</h2>
             <Badge className="bg-green-50 text-risk-low border-green-200">Customer Safe</Badge>
           </div>
           <Card className="p-4">
@@ -202,7 +349,7 @@ function ExportInner() {
               <div>
                 <div className="text-[13.5px] font-semibold">Customer BOM Cost Review Excel</div>
                 <div className="text-[11.5px] text-slate-500 mt-0.5">
-                  דוח עלות BOM ללקוח — כולל Price Source, מחירי לקוח וסיכום עלויות (USD)
+                  דוח ללקוח ללא עלויות פנימיות, ללא Link/מזרח, ללא Margin/Savings
                 </div>
               </div>
             </div>
@@ -214,7 +361,11 @@ function ExportInner() {
                 </li>
               ))}
             </ul>
+            {!canBomExport && (
+              <p className="text-[11px] text-slate-500 mb-2">בחר פרויקט וגרסת BOM</p>
+            )}
             <button
+              type="button"
               disabled={!canBomExport || busy != null}
               onClick={() =>
                 runExport("customer", "/api/exports/customer-bom-review", {
@@ -234,75 +385,146 @@ function ExportInner() {
           </Card>
         </section>
 
+        {/* B. Internal */}
         <section>
           <div className="flex items-center gap-2 mb-2">
             <Lock className="h-4 w-4 text-amber-700" />
-            <h2 className="text-[14px] font-semibold">ייצוא פנימי</h2>
+            <h2 className="text-[14px] font-semibold">דוחות פנימיים</h2>
             <Badge className="bg-amber-50 text-amber-800 border-amber-200">Internal Only</Badge>
           </div>
-          <div className="space-y-3">
-            <Card className="p-4">
-              <div className="flex items-start gap-3 mb-2">
-                <FileSpreadsheet className="h-7 w-7 text-brand shrink-0" />
-                <div>
-                  <div className="text-[13px] font-semibold">Internal BOM Quality Excel</div>
-                  <div className="text-[11px] text-slate-500">סטטוס איכות, DNP, Needs Review</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 mb-3">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                פנימי בלבד — לא להעברה ללקוח
-              </div>
-              <button
-                disabled={!canBomExport || busy != null}
-                onClick={() =>
-                  runExport("quality", "/api/exports/internal-bom-quality", {
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <ExportCard
+              title="Internal BOM Quality Excel"
+              description="סטטוס איכות, תיקונים, DNP, Needs Review, שגיאות ואזהרות"
+              warning="פנימי בלבד — לא להעברה ללקוח"
+              disabled={!hasQualityData || busy != null}
+              disabledReason={qualityDisabledReason}
+              busy={busy}
+              busyKey="quality"
+              exportKey="quality"
+              onExport={() =>
+                runExport("quality", "/api/exports/internal-bom-quality", {
+                  project_id: pid!,
+                  bom_version_id: vid!,
+                })
+              }
+            />
+
+            <div className="space-y-2">
+              <ExportCard
+                title="Internal Pricing Snapshot Excel"
+                description="מקור נבחר, מחירים, מלאי, Lead Time, הצעות זמינות, מצב מחירון"
+                warning="פנימי בלבד — עשוי לכלול Link/מזרח וחיסכון פנימי"
+                disabled={!hasPricingData || busy != null}
+                disabledReason={pricingDisabledReason}
+                busy={busy}
+                busyKey="pricing"
+                exportKey="pricing"
+                onExport={() =>
+                  runExport("pricing", "/api/exports/internal-pricing-workbench", {
                     project_id: pid!,
                     bom_version_id: vid!,
+                    include_east: eastForPricing,
                   })
                 }
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50 disabled:opacity-60"
-              >
-                {busy === "quality" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                הורד Excel
-              </button>
-            </Card>
+              />
+              <div className="px-1">
+                <label className="block text-[11px] text-slate-600 mb-1">מצב מחירון</label>
+                <select
+                  value={eastForPricing ? "east" : "official"}
+                  onChange={(e) => setPricingIncludeEast(e.target.value === "east")}
+                  disabled={!canBomExport}
+                  className="w-full h-8 rounded-md border border-slate-200 px-2 text-[11.5px] bg-white disabled:opacity-60"
+                >
+                  {PRICING_MODES.map((m) => (
+                    <option key={String(m.value)} value={m.value ? "east" : "official"}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-            <Card className="p-4">
-              <div className="flex items-start gap-3 mb-2">
-                <FileSpreadsheet className="h-7 w-7 text-brand shrink-0" />
-                <div>
-                  <div className="text-[13px] font-semibold">Internal Pricing Snapshot Excel</div>
-                  <div className="text-[11px] text-slate-500">עלות יחידה, Extended Cost, Match Confidence</div>
+            <ExportCard
+              title="Internal Pricing Comparison Excel"
+              description="השוואת רשמי מול מזרח — סיכום ושורות עם פערי מחיר"
+              warning="פנימי בלבד — כולל נתוני חיסכון פנימיים"
+              disabled={!hasPricingData || busy != null}
+              disabledReason={pricingDisabledReason}
+              busy={busy}
+              busyKey="comparison"
+              exportKey="comparison"
+              onExport={() =>
+                runExport("comparison", "/api/exports/internal-pricing-comparison", {
+                  project_id: pid!,
+                  bom_version_id: vid!,
+                  include_east: eastForPricing,
+                })
+              }
+            />
+          </div>
+        </section>
+
+        {/* C. Procurement */}
+        <section>
+          <div className="flex items-center gap-2 mb-2">
+            <ShoppingCart className="h-4 w-4 text-navy" />
+            <h2 className="text-[14px] font-semibold">דוחות רכש</h2>
+            <Badge className="bg-amber-50 text-amber-800 border-amber-200">Internal Only</Badge>
+          </div>
+          <Card className="p-4">
+            <div className="flex items-start gap-3 mb-3">
+              <FileSpreadsheet className="h-8 w-8 text-brand shrink-0" />
+              <div>
+                <div className="text-[13.5px] font-semibold">Supplier Purchase Report Excel</div>
+                <div className="text-[11.5px] text-slate-500 mt-0.5">
+                  קובץ רכש פנימי לפי ספק — סיכום שורות רכש וגיליונות לפי ספק
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-amber-800 mb-3">
-                <AlertTriangle className="h-3.5 w-3.5" />
-                פנימי בלבד — לא להעברה ללקוח
-              </div>
-              <button
-                disabled={!canPricingExport || busy != null}
-                onClick={() =>
-                  runExport("pricing", "/api/exports/internal-pricing-snapshot", {
-                    project_id: pid!,
-                    pricing_snapshot_id: sid!,
-                  })
-                }
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50 disabled:opacity-60"
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] text-amber-800 mb-3">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              פנימי בלבד — עשוי לכלול Link/מחירי מזרח וספק פנימי
+            </div>
+            <div className="mb-3 max-w-sm">
+              <label className="block text-[11px] text-slate-600 mb-1">ספק</label>
+              <select
+                value={purchaseSupplier}
+                onChange={(e) => setPurchaseSupplier(e.target.value)}
+                disabled={!canBomExport}
+                className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12px] bg-white disabled:opacity-60"
               >
-                {busy === "pricing" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                הורד Excel
-              </button>
-            </Card>
-          </div>
+                {PURCHASE_SUPPLIER_FILTERS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {!hasPricingData && pricingDisabledReason && (
+              <p className="text-[11px] text-slate-500 mb-2">{pricingDisabledReason}</p>
+            )}
+            <button
+              type="button"
+              disabled={!hasPricingData || busy != null}
+              onClick={() =>
+                runExport("purchase", "/api/exports/supplier-purchase-report", {
+                  project_id: pid!,
+                  bom_version_id: vid!,
+                  supplier: purchaseSupplier,
+                  include_east: includeEastForPurchase,
+                })
+              }
+              className="inline-flex items-center gap-1.5 h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] font-medium hover:bg-slate-50 disabled:opacity-60"
+            >
+              {busy === "purchase" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              הורד Excel
+            </button>
+          </Card>
         </section>
       </div>
     </>

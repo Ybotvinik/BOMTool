@@ -16,11 +16,12 @@ from app.models import (
 from app.services.suppliers.base import (
     SUPPLIER_DIGIKEY,
     SUPPLIER_MOUSER,
+    SUPPLIER_TI,
     SupplierPriceResult,
     normalize_mpn,
 )
 
-DEFAULT_SUPPLIER_PRIORITY = [SUPPLIER_DIGIKEY, SUPPLIER_MOUSER]
+DEFAULT_SUPPLIER_PRIORITY = [SUPPLIER_DIGIKEY, SUPPLIER_MOUSER, SUPPLIER_TI]
 
 
 def is_dnp_line(line: BomLine) -> bool:

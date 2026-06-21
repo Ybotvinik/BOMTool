@@ -9,11 +9,15 @@ from typing import Any
 
 SUPPLIER_DIGIKEY = "digikey"
 SUPPLIER_MOUSER = "mouser"
+SUPPLIER_TI = "ti"
 SUPPLIER_LINK = "link"
+
+OFFICIAL_API_SUPPLIERS = frozenset({SUPPLIER_DIGIKEY, SUPPLIER_MOUSER, SUPPLIER_TI})
 
 SUPPLIER_DISPLAY_NAMES: dict[str, str] = {
     SUPPLIER_DIGIKEY: "Digi-Key",
     SUPPLIER_MOUSER: "Mouser",
+    SUPPLIER_TI: "TI",
     SUPPLIER_LINK: "Link",
 }
 

@@ -23,11 +23,13 @@ from app.services.activity import log_activity
 from app.services.bom_quality import compute_required_qty
 from app.services.suppliers.base import (
     INTERNAL_SUPPLIERS,
+    OFFICIAL_API_SUPPLIERS,
     SOURCE_TYPE_EAST,
     SUPPLIER_DIGIKEY,
     SUPPLIER_DISPLAY_NAMES,
     SUPPLIER_LINK,
     SUPPLIER_MOUSER,
+    SUPPLIER_TI,
     SupplierApiError,
     SupplierPriceResult,
     normalize_mpn,
@@ -35,6 +37,7 @@ from app.services.suppliers.base import (
 from app.services.east_quotes.service import east_offers_by_bom_line, list_east_quotes
 from app.services.suppliers.digikey import DigiKeyClient
 from app.services.suppliers.mouser import MouserClient
+from app.services.suppliers.ti import TIClient
 from app.services.suppliers.pricing_store import (
     DEFAULT_SUPPLIER_PRIORITY,
     is_dnp_line,
@@ -88,6 +91,8 @@ def _client_for_supplier(supplier: str, settings: Settings):
         return DigiKeyClient(settings)
     if supplier == SUPPLIER_MOUSER:
         return MouserClient(settings)
+    if supplier == SUPPLIER_TI:
+        return TIClient(settings)
     raise ValueError(f"Unknown supplier: {supplier}")
 
 
@@ -699,6 +704,7 @@ def get_workbench_results(
     bom_version_id: int,
     priority: list[str] | None = None,
     settings: Settings | None = None,
+    include_east_override: bool | None = None,
 ) -> dict:
     settings = settings or get_settings()
     priority = priority or DEFAULT_SUPPLIER_PRIORITY
@@ -706,7 +712,11 @@ def get_workbench_results(
     if version is None or version.project_id != project_id:
         raise ValueError("BOM version not found")
 
-    include_east = bool(version.include_east_pricing)
+    include_east = (
+        bool(include_east_override)
+        if include_east_override is not None
+        else bool(version.include_east_pricing)
+    )
     east_by_line = east_offers_by_bom_line(
         db, project_id=project_id, bom_version_id=bom_version_id
     )
@@ -801,6 +811,7 @@ def get_workbench_results(
                 "search_mpn_override_active": bool(override and override.search_mpn_override),
                 "manufacturer": bl.manufacturer,
                 "description": bl.description,
+                "reference_designators": bl.reference_designators,
                 "required_qty": req_f,
                 "dnp": dnp,
                 "source": sel.source,
@@ -1028,7 +1039,7 @@ def fetch_single_line(
     if bl is None or bl.bom_version_id != bom_version_id:
         raise ValueError("BOM line not found")
 
-    valid = [s for s in suppliers if s in (SUPPLIER_DIGIKEY, SUPPLIER_MOUSER)]
+    valid = [s for s in suppliers if s in OFFICIAL_API_SUPPLIERS]
     if not valid:
         raise ValueError("No valid suppliers")
 

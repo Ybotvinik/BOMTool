@@ -55,7 +55,7 @@ export function PricingModeSwitch({
         >
           רשמי בלבד
           <span className="block text-[9px] font-normal opacity-80 mt-0.5">
-            Digi-Key / Mouser / Manual
+            Digi-Key / Mouser / TI / Manual
           </span>
         </button>
         <button

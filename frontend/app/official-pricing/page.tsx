@@ -14,10 +14,12 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
+import { PageTabs } from "@/components/PageTabs";
 import { SupplierOffersDrawer } from "@/components/official-pricing/SupplierOffersDrawer";
 import { EastQuotesPanel, type EastQuoteRow } from "@/components/official-pricing/EastQuotesPanel";
 import { PricingModeSwitch } from "@/components/official-pricing/PricingModeSwitch";
 import { PricingComparisonCards } from "@/components/official-pricing/PricingComparisonCards";
+import { SingleComponentCheckPanel } from "@/components/official-pricing/SingleComponentCheckPanel";
 import {
   FILTERS,
   fmtPrice,
@@ -30,6 +32,11 @@ import {
 } from "@/components/official-pricing/types";
 import { apiDownloadPost, apiGet, apiPatch, apiPost, triggerBlobDownload } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
+import {
+  readLastOfficialPricingProjectId,
+  readLastOfficialPricingVersionId,
+  saveOfficialPricingContext,
+} from "@/lib/official-pricing-context";
 
 type ApiProject = { id: number; name: string };
 type ApiVersion = { id: number; version_label: string; version_name: string | null; is_active: boolean };
@@ -63,6 +70,13 @@ type SnapshotResponse = {
   is_mock: boolean;
 };
 
+const OFFICIAL_PRICING_TABS = [
+  { id: "workbench", label: "מחירון BOM" },
+  { id: "component-check", label: "בדיקת רכיב בודד" },
+] as const;
+
+type OfficialPricingTab = (typeof OFFICIAL_PRICING_TABS)[number]["id"];
+
 function CompactKpi({
   label,
   value,
@@ -91,6 +105,7 @@ function SourceBadge({ source, internal }: { source: string; internal?: boolean 
   const map: Record<string, string> = {
     "Digi-Key": "bg-blue-50 text-blue-700 border-blue-200",
     Mouser: "bg-violet-50 text-violet-700 border-violet-200",
+    TI: "bg-red-50 text-red-700 border-red-200",
     Link: "bg-amber-50 text-amber-800 border-amber-200",
     Manual: "bg-sky-50 text-sky-700 border-sky-200",
     TBD: "bg-slate-100 text-slate-600 border-slate-300",
@@ -98,12 +113,15 @@ function SourceBadge({ source, internal }: { source: string; internal?: boolean 
   };
   const style =
     map[source] ??
-    (source.startsWith("Manual") ? map.Manual : "bg-slate-100 text-slate-700 border-slate-200");
-  const isLink = source === "Link" || internal;
+    (internal
+      ? "bg-amber-50 text-amber-800 border-amber-200"
+      : source.startsWith("Manual")
+        ? map.Manual
+        : "bg-slate-100 text-slate-700 border-slate-200");
   return (
     <span className="inline-flex items-center gap-0.5 flex-wrap" title="מקור המחיר שנבחר לשורת BOM זו">
       <Badge className={style}>{source}</Badge>
-      {isLink && (
+      {internal && (
         <>
           <span className="text-[8px] px-1 py-px rounded bg-amber-100 text-amber-800 border border-amber-200 leading-tight">
             פנימי
@@ -217,6 +235,7 @@ export default function OfficialPricingPage() {
 
 function OfficialPricingPageInner() {
   const urlProjectId = useSearchParams().get("project_id");
+  const activeTab = (useSearchParams().get("tab") as OfficialPricingTab | null) ?? "workbench";
   const { user } = useCurrentUser();
 
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -231,7 +250,7 @@ function OfficialPricingPageInner() {
   const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
   const [snapshotName, setSnapshotName] = useState("Supplier Pricing Snapshot");
 
-  const [suppliers, setSuppliers] = useState({ digikey: true, mouser: true });
+  const [suppliers, setSuppliers] = useState({ digikey: true, mouser: true, ti: true });
   const [mode, setMode] = useState<"all" | "missing_only">("all");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
@@ -263,22 +282,48 @@ function OfficialPricingPageInner() {
   useEffect(() => {
     apiGet<ApiProject[]>("/api/projects").then((ps) => {
       setProjects(ps);
+      if (!ps.length) return;
+
+      let nextId: number | null = null;
       if (urlProjectId) {
-        const match = ps.find((p) => String(p.id) === urlProjectId);
-        if (match) setProjectId(match.id);
-      } else if (ps.length) setProjectId(ps[0].id);
+        const fromUrl = ps.find((p) => String(p.id) === urlProjectId);
+        if (fromUrl) nextId = fromUrl.id;
+      }
+      if (nextId == null) {
+        const savedId = readLastOfficialPricingProjectId();
+        if (savedId != null && ps.some((p) => p.id === savedId)) nextId = savedId;
+      }
+      if (nextId == null) nextId = ps[0].id;
+      setProjectId(nextId);
     });
     apiGet<ConfigStatus>("/api/official-pricing/status").then(setConfig).catch(() => setConfig(null));
   }, [urlProjectId]);
 
   useEffect(() => {
     if (projectId == null) return;
+    const savedVersionId = readLastOfficialPricingVersionId(projectId);
     apiGet<ApiVersion[]>(`/api/bom-versions?project_id=${projectId}`).then((vs) => {
       setVersions(vs);
+      const fromSaved =
+        savedVersionId != null ? vs.find((v) => v.id === savedVersionId) : undefined;
       const active = vs.find((v) => v.is_active) ?? vs[vs.length - 1];
-      setVersionId(active ? active.id : null);
+      setVersionId((fromSaved ?? active)?.id ?? null);
     });
   }, [projectId]);
+
+  useEffect(() => {
+    if (projectId != null) saveOfficialPricingContext(projectId, versionId);
+  }, [projectId, versionId]);
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+
+  const selectedVersion = useMemo(
+    () => versions.find((v) => v.id === versionId) ?? null,
+    [versions, versionId],
+  );
 
   const loadWorkbench = useCallback(async () => {
     if (projectId == null || versionId == null) return;
@@ -319,12 +364,25 @@ function OfficialPricingPageInner() {
 
   const noStockCount = useMemo(() => lines.filter((ln) => ln.status === "No Stock").length, [lines]);
 
+  const selectedSuppliers = useMemo(
+    () => [
+      ...(suppliers.digikey ? ["digikey"] : []),
+      ...(suppliers.mouser ? ["mouser"] : []),
+      ...(suppliers.ti ? ["ti"] : []),
+    ],
+    [suppliers],
+  );
+
   const credentialsMissing =
-    config && !config.mock_mode && (config.digikey.credentials_missing || config.mouser.credentials_missing);
+    config &&
+    !config.mock_mode &&
+    ((suppliers.digikey && config.digikey.credentials_missing) ||
+      (suppliers.mouser && config.mouser.credentials_missing) ||
+      (suppliers.ti && config.ti.credentials_missing));
 
   async function doFetch() {
     if (projectId == null || versionId == null) return;
-    const selected = [...(suppliers.digikey ? ["digikey"] : []), ...(suppliers.mouser ? ["mouser"] : [])];
+    const selected = selectedSuppliers;
     if (!selected.length) {
       setError("יש לבחור לפחות ספק אחד");
       return;
@@ -358,10 +416,7 @@ function OfficialPricingPageInner() {
           project_id: projectId,
           bom_version_id: versionId,
           snapshot_name: snapshotName,
-          supplier_priority: [
-            ...(suppliers.digikey ? ["digikey"] : []),
-            ...(suppliers.mouser ? ["mouser"] : []),
-          ],
+          supplier_priority: selectedSuppliers,
         },
         user.id,
       );
@@ -494,10 +549,7 @@ function OfficialPricingPageInner() {
           project_id: projectId,
           bom_version_id: versionId,
           bom_line_id: ln.bom_line_id,
-          suppliers: [
-            ...(suppliers.digikey ? ["digikey"] : []),
-            ...(suppliers.mouser ? ["mouser"] : []),
-          ],
+          suppliers: selectedSuppliers,
         },
         user.id,
       );
@@ -512,26 +564,66 @@ function OfficialPricingPageInner() {
 
   return (
     <div className="flex flex-col gap-1 min-h-0 -mt-2 h-[calc(100vh-7rem)] overflow-hidden">
-      <div className="flex items-center justify-between gap-2 shrink-0">
-        <h1 className="text-[15px] font-bold text-navy tracking-tight leading-none">מחירון BOM מספקים</h1>
-        <div className="flex gap-1.5">
-          <button
-            type="button"
-            onClick={() => loadWorkbench()}
-            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50"
-          >
-            <RefreshCw className="w-3.5 h-3.5" /> רענון
-          </button>
-          <button
-            type="button"
-            disabled={busy || !lines.length}
-            onClick={doWorkbenchExport}
-            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50 disabled:opacity-50"
-          >
-            <FileDown className="w-3.5 h-3.5" /> ייצוא Workbench
-          </button>
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-3 shrink-0">
+        <div className="min-w-0 justify-self-start">
+          <h1 className="text-[15px] font-bold text-navy tracking-tight leading-none">מחירון BOM מספקים</h1>
+        </div>
+
+        <div className="min-w-0 text-center px-2">
+          {selectedProject ? (
+            <>
+              <div
+                className="text-[22px] font-bold text-navy leading-tight truncate"
+                title={selectedProject.name}
+              >
+                {selectedProject.name}
+              </div>
+              {activeTab === "workbench" && selectedVersion && (
+                <div className="mt-0.5 text-[13px] font-medium text-slate-600 truncate" title={selectedVersion.version_name ?? undefined}>
+                  {selectedVersion.version_label}
+                  {selectedVersion.version_name ? ` · ${selectedVersion.version_name}` : ""}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-[13px] text-slate-500">טוען פרויקט…</p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-1.5 justify-self-end">
+        {activeTab === "workbench" && (
+          <>
+            <button
+              type="button"
+              onClick={() => loadWorkbench()}
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50"
+            >
+              <RefreshCw className="w-3.5 h-3.5" /> רענון
+            </button>
+            <button
+              type="button"
+              disabled={busy || !lines.length}
+              onClick={doWorkbenchExport}
+              className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50 disabled:opacity-50"
+            >
+              <FileDown className="w-3.5 h-3.5" /> ייצוא Workbench
+            </button>
+          </>
+        )}
         </div>
       </div>
+
+      <PageTabs
+        tabs={[...OFFICIAL_PRICING_TABS]}
+        activeTab={activeTab}
+        basePath="/official-pricing"
+        query={{ project_id: projectId }}
+      />
+
+      {activeTab === "component-check" ? (
+        <SingleComponentCheckPanel config={config} />
+      ) : (
+        <>
 
       {(config?.mock_mode || (!config?.mock_mode && credentialsMissing)) && (
         <div className="flex flex-wrap gap-1.5 shrink-0">
@@ -598,6 +690,10 @@ function OfficialPricingPageInner() {
           <label className="inline-flex items-center gap-1 text-[10.5px]">
             <input type="checkbox" checked={suppliers.mouser} onChange={(e) => setSuppliers((s) => ({ ...s, mouser: e.target.checked }))} />
             Mouser
+          </label>
+          <label className="inline-flex items-center gap-1 text-[10.5px]">
+            <input type="checkbox" checked={suppliers.ti} onChange={(e) => setSuppliers((s) => ({ ...s, ti: e.target.checked }))} />
+            TI
           </label>
           <button
             type="button"
@@ -869,6 +965,8 @@ function OfficialPricingPageInner() {
             </div>
           </Card>
         </div>
+      )}
+        </>
       )}
     </div>
   );

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import BomVersion, Project, SupplierQuote, SupplierQuoteLine
 from app.services.activity import log_activity
-from app.services.east_quotes.link_parser import parse_link_xlsx
+from app.services.east_quotes.link_parser import ParsedEastQuote, parse_link_xlsx
 from app.services.east_quotes.matching import match_east_quote_lines
 from app.services.file_storage import get_file_storage
 
@@ -46,7 +46,31 @@ def _east_mpn_for_display(ql: SupplierQuoteLine) -> str | None:
 
 
 def _normalize_supplier_key(name: str) -> str:
-    return (name or "link").strip().lower().replace(" ", "_")
+    return (name or "east").strip().lower().replace(" ", "_")
+
+
+def _east_line_supplier_display(ql: SupplierQuoteLine, quote: SupplierQuote) -> str:
+    for raw in (ql.vendor, ql.brand, ql.supplier_code):
+        candidate = (raw or "").strip()
+        if candidate:
+            return candidate
+    return (quote.supplier_name or "מזרח").strip()
+
+
+def _derive_quote_supplier_label(parsed: ParsedEastQuote, filename: str) -> str:
+    vendors = sorted(
+        {
+            ln.vendor.strip()
+            for ln in parsed.lines
+            if ln.vendor and str(ln.vendor).strip()
+        }
+    )
+    if len(vendors) == 1:
+        return vendors[0]
+    if len(vendors) > 1:
+        return f"מזרח ({len(vendors)} ספקים)"
+    base = (filename or "מחירון מזרח").rsplit(".", 1)[0].strip()
+    return base or "מחירון מזרח"
 
 
 def list_east_quotes(
@@ -126,7 +150,7 @@ def upload_east_quote(
     filename: str,
     project_id: int,
     bom_version_id: int,
-    supplier_name: str = "Link",
+    supplier_name: str | None = None,
     replace_existing: bool = False,
     quote_id_to_replace: int | None = None,
     user_id: int | None,
@@ -139,8 +163,8 @@ def upload_east_quote(
         raise ValueError("BOM version not found")
 
     parsed = parse_link_xlsx(content, filename)
+    quote_supplier_name = (supplier_name or "").strip() or _derive_quote_supplier_label(parsed, filename)
     now = datetime.now(timezone.utc)
-    supplier_key = _normalize_supplier_key(supplier_name)
 
     if replace_existing and quote_id_to_replace:
         old = db.get(SupplierQuote, quote_id_to_replace)
@@ -150,31 +174,16 @@ def upload_east_quote(
         old.is_active = False
         old.updated_at = now
 
-    # Deactivate other active quotes for same supplier unless we're only adding history
-    if not replace_existing:
-        db.execute(
-            update(SupplierQuote)
-            .where(
-                SupplierQuote.project_id == project_id,
-                SupplierQuote.bom_version_id == bom_version_id,
-                SupplierQuote.source_type == SOURCE_TYPE_EAST,
-                SupplierQuote.supplier_name == supplier_name,
-                SupplierQuote.is_active.is_(True),
-            )
-            .values(is_active=False, status="archived", updated_at=now)
+    db.execute(
+        update(SupplierQuote)
+        .where(
+            SupplierQuote.project_id == project_id,
+            SupplierQuote.bom_version_id == bom_version_id,
+            SupplierQuote.source_type == SOURCE_TYPE_EAST,
+            SupplierQuote.is_active.is_(True),
         )
-    else:
-        db.execute(
-            update(SupplierQuote)
-            .where(
-                SupplierQuote.project_id == project_id,
-                SupplierQuote.bom_version_id == bom_version_id,
-                SupplierQuote.source_type == SOURCE_TYPE_EAST,
-                SupplierQuote.supplier_name == supplier_name,
-                SupplierQuote.is_active.is_(True),
-            )
-            .values(is_active=False, updated_at=now)
-        )
+        .values(is_active=False, status="archived", updated_at=now)
+    )
 
     storage = get_file_storage()
     stored = storage.save(content, filename or "east-quote.xlsx", subdir="east-quotes")
@@ -183,7 +192,7 @@ def upload_east_quote(
         project_id=project_id,
         bom_version_id=bom_version_id,
         quote_name=filename,
-        supplier_name=supplier_name,
+        supplier_name=quote_supplier_name,
         source_type=SOURCE_TYPE_EAST,
         currency="USD",
         source_file_name=filename,
@@ -220,7 +229,7 @@ def upload_east_quote(
                 value=ln.value,
                 supplier_part_number=ln.supplier_part_number,
                 assembly=ln.assembly,
-                vendor=ln.vendor or supplier_name,
+                vendor=ln.vendor,
                 quoted_qty=ln.quoted_qty,
                 unit_price=ln.unit_price,
                 total_price=ln.total_price,
@@ -244,9 +253,9 @@ def upload_east_quote(
         action_type="east_quote_uploaded",
         project_id=project_id,
         entity_type="east_supplier_quote",
-        entity_name=f"{supplier_name}: {filename}",
+        entity_name=f"{quote_supplier_name}: {filename}",
         change_summary=(
-            f"East quote uploaded ({supplier_name}): {len(parsed.lines)} lines, "
+            f"East quote uploaded ({quote_supplier_name}): {len(parsed.lines)} lines, "
             f"matched={match_summary.get('matched_count', 0)}"
         ),
         commit=False,
@@ -255,7 +264,7 @@ def upload_east_quote(
 
     return {
         "quote_id": quote.id,
-        "supplier_name": supplier_name,
+        "supplier_name": quote_supplier_name,
         "source_filename": filename,
         "board_name": parsed.board_name,
         "doc_number": parsed.doc_number,
@@ -277,7 +286,6 @@ def set_active_quote(db: Session, quote_id: int, user_id: int | None) -> dict:
         .where(
             SupplierQuote.project_id == quote.project_id,
             SupplierQuote.bom_version_id == quote.bom_version_id,
-            SupplierQuote.supplier_name == quote.supplier_name,
             SupplierQuote.source_type == SOURCE_TYPE_EAST,
             SupplierQuote.id != quote_id,
         )
@@ -346,11 +354,12 @@ def east_offers_by_bom_line(
         quote = quote_by_id.get(ql.supplier_quote_id)
         if quote is None:
             continue
-        supplier_key = _normalize_supplier_key(quote.supplier_name)
+        supplier_display = _east_line_supplier_display(ql, quote)
+        supplier_key = _normalize_supplier_key(supplier_display)
         is_exact = ql.match_status in ("exact_mpn", "matched", "designator_match")
         offer = {
             "supplier": supplier_key,
-            "supplier_display": quote.supplier_name,
+            "supplier_display": supplier_display,
             "mpn": _east_mpn_for_display(ql),
             "matched_mpn": _east_mpn_for_display(ql),
             "supplier_part_number": _east_supplier_pn_for_display(ql),

@@ -142,7 +142,9 @@ export async function apiEastQuoteUpload<T>(opts: {
   form.append("file", opts.file);
   form.append("project_id", String(opts.projectId));
   form.append("bom_version_id", String(opts.bomVersionId));
-  form.append("supplier_name", opts.supplierName ?? "Link");
+  if (opts.supplierName?.trim()) {
+    form.append("supplier_name", opts.supplierName.trim());
+  }
   form.append("replace_existing", String(opts.replaceExisting ?? false));
   if (opts.quoteIdToReplace != null) {
     form.append("quote_id_to_replace", String(opts.quoteIdToReplace));

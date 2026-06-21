@@ -31,7 +31,6 @@ type Props = {
 
 export function EastQuotesPanel({ projectId, versionId, userId, quotes, onChanged, onError }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [supplierName, setSupplierName] = useState("Link");
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [replaceQuoteId, setReplaceQuoteId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -47,7 +46,6 @@ export function EastQuotesPanel({ projectId, versionId, userId, quotes, onChange
         file,
         projectId,
         bomVersionId: versionId,
-        supplierName,
         replaceExisting,
         quoteIdToReplace: replaceExisting ? replaceQuoteId ?? undefined : undefined,
         userId,
@@ -97,6 +95,7 @@ export function EastQuotesPanel({ projectId, versionId, userId, quotes, onChange
     <div className="rounded-md border border-slate-200 bg-white p-2 shrink-0">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10.5px] font-semibold text-slate-600">העלאת מחירי מזרח</span>
+        <span className="text-[9.5px] text-slate-500">שם הספק נלקח מהקובץ (עמודת Vendor)</span>
         {activeQuote && (
           <div className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-[10px]">
             <CheckCircle2 className="w-3 h-3 text-amber-600" />
@@ -113,13 +112,6 @@ export function EastQuotesPanel({ projectId, versionId, userId, quotes, onChange
             </span>
           </div>
         )}
-        <select
-          className="h-7 rounded-md border border-slate-200 px-1.5 text-[10.5px] bg-white"
-          value={supplierName}
-          onChange={(e) => setSupplierName(e.target.value)}
-        >
-          <option value="Link">Link</option>
-        </select>
         <label className="inline-flex items-center gap-1 text-[10px] text-slate-600">
           <input
             type="checkbox"

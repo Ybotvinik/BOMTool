@@ -13,8 +13,11 @@ from app.services.activity import log_activity
 from app.services.export_excel import (
     build_customer_bom_review_xlsx,
     build_internal_bom_quality_xlsx,
+    build_internal_pricing_comparison_xlsx,
     build_internal_pricing_snapshot_xlsx,
+    build_internal_pricing_workbench_xlsx,
     build_supplier_pricing_workbench_xlsx,
+    build_supplier_purchase_report_xlsx,
 )
 from app.services.file_storage import get_file_storage
 
@@ -39,6 +42,19 @@ class InternalBomQualityExportRequest(BaseModel):
 class InternalPricingExportRequest(BaseModel):
     project_id: int
     pricing_snapshot_id: int
+
+
+class InternalWorkbenchExportRequest(BaseModel):
+    project_id: int
+    bom_version_id: int
+    include_east: bool | None = None
+
+
+class SupplierPurchaseExportRequest(BaseModel):
+    project_id: int
+    bom_version_id: int
+    supplier: str = "all"
+    include_east: bool = False
 
 
 def _load_project(db: Session, project_id: int) -> Project:
@@ -220,5 +236,128 @@ def export_internal_pricing_snapshot(
         bom_version_id=snapshot.bom_version_id,
         action_type="internal_export_created",
         change_summary=f"Internal Pricing Snapshot export '{file_name}'",
+    )
+    return _xlsx_response(content, file_name)
+
+
+@router.post("/internal-pricing-workbench")
+def export_internal_pricing_workbench(
+    payload: InternalWorkbenchExportRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> Response:
+    project, version, _lines = _load_bom_version(
+        db, payload.project_id, payload.bom_version_id
+    )
+    content, file_name = build_internal_pricing_workbench_xlsx(
+        db,
+        project=project,
+        version=version,
+        include_east=payload.include_east,
+    )
+    _persist_export(
+        db,
+        project_id=project.id,
+        report_type="internal_pricing_workbench",
+        file_name=file_name,
+        content=content,
+        user_id=user_id,
+        is_customer_safe=False,
+        bom_version_id=version.id,
+        action_type="internal_export_created",
+        change_summary=f"Internal Pricing Workbench export '{file_name}'",
+    )
+    return _xlsx_response(content, file_name)
+
+
+@router.post("/internal-pricing-comparison")
+def export_internal_pricing_comparison(
+    payload: InternalWorkbenchExportRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> Response:
+    project, version, _lines = _load_bom_version(
+        db, payload.project_id, payload.bom_version_id
+    )
+    content, file_name = build_internal_pricing_comparison_xlsx(
+        db,
+        project=project,
+        version=version,
+        include_east=payload.include_east,
+    )
+    _persist_export(
+        db,
+        project_id=project.id,
+        report_type="internal_pricing_comparison",
+        file_name=file_name,
+        content=content,
+        user_id=user_id,
+        is_customer_safe=False,
+        bom_version_id=version.id,
+        action_type="internal_export_created",
+        change_summary=f"Internal Pricing Comparison export '{file_name}'",
+    )
+    return _xlsx_response(content, file_name)
+
+
+@router.post("/supplier-purchase-report")
+def export_supplier_purchase_report(
+    payload: SupplierPurchaseExportRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> Response:
+    project, version, _lines = _load_bom_version(
+        db, payload.project_id, payload.bom_version_id
+    )
+    content, file_name = build_supplier_purchase_report_xlsx(
+        db,
+        project=project,
+        version=version,
+        supplier_filter=payload.supplier,
+        include_east=payload.include_east,
+    )
+    _persist_export(
+        db,
+        project_id=project.id,
+        report_type="supplier_purchase_report",
+        file_name=file_name,
+        content=content,
+        user_id=user_id,
+        is_customer_safe=False,
+        bom_version_id=version.id,
+        action_type="internal_export_created",
+        change_summary=f"Supplier Purchase Report export '{file_name}'",
+    )
+    return _xlsx_response(content, file_name)
+
+
+@router.get("/supplier-purchase-report")
+def export_supplier_purchase_report_get(
+    project_id: int,
+    bom_version_id: int,
+    supplier: str = "all",
+    include_east: bool = False,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> Response:
+    project, version, _lines = _load_bom_version(db, project_id, bom_version_id)
+    content, file_name = build_supplier_purchase_report_xlsx(
+        db,
+        project=project,
+        version=version,
+        supplier_filter=supplier,
+        include_east=include_east,
+    )
+    _persist_export(
+        db,
+        project_id=project.id,
+        report_type="supplier_purchase_report",
+        file_name=file_name,
+        content=content,
+        user_id=user_id,
+        is_customer_safe=False,
+        bom_version_id=version.id,
+        action_type="internal_export_created",
+        change_summary=f"Supplier Purchase Report export '{file_name}'",
     )
     return _xlsx_response(content, file_name)
