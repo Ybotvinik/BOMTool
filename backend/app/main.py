@@ -15,6 +15,7 @@ from app.routers import (
     pricing,
     project_cards,
     projects,
+    purchase_file,
     users,
 )
 
@@ -59,4 +60,5 @@ app.include_router(pricing.lines_router, prefix=api)
 app.include_router(pricing.project_router, prefix=api)
 app.include_router(exports.router, prefix=api)
 app.include_router(official_pricing.router, prefix=api)
+app.include_router(purchase_file.router, prefix=api)
 app.include_router(activity_log.router, prefix=api)

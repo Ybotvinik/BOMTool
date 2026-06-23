@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -6,21 +6,23 @@ from app.database import get_db
 from app.deps import get_current_user_id
 from app.models import BomLine, BomVersion, Project
 from app.schemas.bom_line import BomLineRead
+from app.schemas.bom_compare import BomCompareResponse, BomVersionCatalogResponse
 from app.schemas.bom_version import (
     BomVersionCreate,
     BomVersionRead,
     BomVersionUpdate,
 )
 from app.services.activity import log_activity
-from app.services.bom_quality import reanalyze_bom_version_quality
+from app.services.bom_quality import compute_quality_summary, reanalyze_bom_version_quality
 from app.services.bom_line_override import (
     line_to_quality_dict,
     open_quality_issues,
     quality_lines_for_version,
 )
-from app.services.bom_quality import (
-    compute_quality_summary,
-    reanalyze_bom_version_quality,
+from app.services.bom_compare import (
+    activate_bom_version,
+    build_version_catalog,
+    compare_bom_versions,
 )
 
 router = APIRouter(prefix="/bom-versions", tags=["bom_versions"])
@@ -34,6 +36,35 @@ def list_bom_versions(
     if project_id is not None:
         stmt = stmt.where(BomVersion.project_id == project_id)
     return list(db.scalars(stmt))
+
+
+@router.get("/catalog", response_model=BomVersionCatalogResponse)
+def version_catalog(
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> BomVersionCatalogResponse:
+    try:
+        return build_version_catalog(db, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/compare", response_model=BomCompareResponse)
+def compare_versions(
+    project_id: int = Query(...),
+    base_version_id: int = Query(...),
+    target_version_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> BomCompareResponse:
+    try:
+        return compare_bom_versions(
+            db,
+            project_id=project_id,
+            base_version_id=base_version_id,
+            target_version_id=target_version_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{version_id}/lines", response_model=list[BomLineRead])
@@ -172,6 +203,30 @@ def update_bom_version(
         entity_type="bom_version",
         entity_name=version.version_label,
         change_summary=f"Updated BOM version '{version.version_label}'",
+    )
+    return version
+
+
+@router.post("/{version_id}/activate", response_model=BomVersionRead)
+def activate_bom_version_endpoint(
+    version_id: int,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> BomVersion:
+    try:
+        version = activate_bom_version(db, version_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    db.refresh(version)
+    log_activity(
+        db,
+        user_id=user_id,
+        action_type="bom_version.activate",
+        project_id=version.project_id,
+        entity_type="bom_version",
+        entity_name=version.version_label,
+        change_summary=f"Activated BOM version '{version.version_label}'",
     )
     return version
 
