@@ -1,0 +1,17 @@
+# LAN alpha overlay — use with the base compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.alpha.yml up -d --build
+#
+# Set ALPHA_HOST_IP in .env.alpha (copy from .env.alpha.example).
+# Colleagues on the same office network open: http://<ALPHA_HOST_IP>:3000
+
+services:
+  backend:
+    environment:
+      CORS_ORIGINS: >-
+        http://localhost:3000,
+        http://127.0.0.1:3000,
+        http://${ALPHA_HOST_IP}:3000
+
+  frontend:
+    environment:
+      NEXT_PUBLIC_API_URL: http://${ALPHA_HOST_IP}:8000

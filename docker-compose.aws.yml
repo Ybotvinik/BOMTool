@@ -1,0 +1,73 @@
+# GlinTech BOM Insight — AWS / remote server deploy
+#
+# Prerequisites on the EC2 instance:
+#   - Docker Engine + Docker Compose plugin
+#   - Security group: inbound TCP 3000 (app) and 8000 (API) from office IP or VPN
+#   - backend/.env with supplier API keys (copy from .env.example)
+#   - .env.aws with PUBLIC_HOST = EC2 public IP or DNS (no http:// prefix)
+#
+# First-time setup:
+#   cp .env.aws.example .env.aws
+#   cp backend/.env.example backend/.env   # then edit secrets
+#   nano .env.aws                          # set PUBLIC_HOST and POSTGRES_PASSWORD
+#
+# Start:
+#   docker compose -f docker-compose.aws.yml --env-file .env.aws up -d --build
+#
+# App URL:  http://<PUBLIC_HOST>:3000
+# Health:   http://<PUBLIC_HOST>:8000/health
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: glintech_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-glintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.aws}
+      POSTGRES_DB: ${POSTGRES_DB:-glintech}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-glintech} -d ${POSTGRES_DB:-glintech}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: glintech_backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-glintech}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-glintech}
+      CORS_ORIGINS: http://${PUBLIC_HOST}:3000,http://localhost:3000,http://127.0.0.1:3000
+      LOCAL_STORAGE_DIR: /data/uploads
+    command: ["bash", "-c", "sed 's/\\r$//' entrypoint.aws.sh | bash -s"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/data/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.aws
+      args:
+        NEXT_PUBLIC_API_URL: http://${PUBLIC_HOST}:8000
+    container_name: glintech_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  db_data:
+  uploads_data:
