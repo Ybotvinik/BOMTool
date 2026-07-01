@@ -9,9 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.models import BomVersion, Project, SupplierQuote, SupplierQuoteLine
 from app.services.activity import log_activity
-from app.services.east_quotes.link_parser import ParsedEastQuote, parse_link_xlsx
+from app.services.east_quotes.link_parser import (
+    ParsedEastQuote,
+    parse_east_with_mapping,
+    parse_link_xlsx,
+)
+from app.services.east_quotes.east_mapping import suggest_east_mapping
 from app.services.east_quotes.matching import match_east_quote_lines
 from app.services.file_storage import get_file_storage
+from app.services.bom_parser import clean_display, detect_header_row, list_sheets_and_rows
 
 SOURCE_TYPE_EAST = "east"
 
@@ -143,16 +149,84 @@ def get_active_east_quotes(
     )
 
 
+PREVIEW_ROWS = 8
+
+
+def preview_east_quote(
+    *,
+    content: bytes,
+    filename: str,
+    sheet_name: str | None = None,
+    header_row_index: int | None = None,
+) -> dict:
+    sheet_names, active_sheet, rows = list_sheets_and_rows(content, filename, sheet_name)
+    detected_index, candidates = detect_header_row(rows)
+    warning: str | None = None
+    used_index = header_row_index if header_row_index is not None else detected_index
+    if used_index is not None and (used_index < 0 or used_index >= len(rows)):
+        raise ValueError("header_row_index out of range")
+
+    columns: list[str] = []
+    preview_rows: list[list[str]] = []
+    total_rows = 0
+    suggested: dict[str, str | None] = {}
+    if used_index is not None:
+        columns = [clean_display(c) for c in rows[used_index]]
+        data_rows = [r for r in rows[used_index + 1 :] if any(x.strip() for x in r)]
+        total_rows = len(data_rows)
+        preview_rows = [[clean_display(c) for c in r] for r in data_rows[:PREVIEW_ROWS]]
+        suggested = suggest_east_mapping(columns)
+    else:
+        warning = "לא זוהתה שורת כותרות — יש לבחור ידנית."
+
+    return {
+        "sheet_names": sheet_names,
+        "sheet_name": active_sheet,
+        "detected_header_row_index": detected_index,
+        "header_row_index": used_index,
+        "columns": columns,
+        "rows": preview_rows,
+        "total_rows": total_rows,
+        "candidate_header_rows": candidates,
+        "suggested_mapping": suggested,
+        "warning": warning,
+    }
+
+
+def _parse_east_content(
+    content: bytes,
+    filename: str,
+    *,
+    sheet_name: str | None,
+    header_row_index: int | None,
+    column_mapping: dict[str, str | None] | None,
+) -> ParsedEastQuote:
+    if column_mapping:
+        return parse_east_with_mapping(
+            content,
+            filename,
+            sheet_name=sheet_name,
+            header_row_index=header_row_index,
+            column_mapping=column_mapping,
+        )
+    return parse_link_xlsx(content, filename, sheet_name=sheet_name)
+
+
 def upload_east_quote(
     db: Session,
     *,
-    content: bytes,
+    content: bytes | None = None,
+    file_path: str | None = None,
     filename: str,
     project_id: int,
     bom_version_id: int,
     supplier_name: str | None = None,
+    sheet_name: str | None = None,
+    header_row_index: int | None = None,
+    column_mapping: dict[str, str | None] | None = None,
     replace_existing: bool = False,
     quote_id_to_replace: int | None = None,
+    enable_integrated_pricing: bool = True,
     user_id: int | None,
 ) -> dict:
     project = db.get(Project, project_id)
@@ -162,7 +236,23 @@ def upload_east_quote(
     if version is None or version.project_id != project_id:
         raise ValueError("BOM version not found")
 
-    parsed = parse_link_xlsx(content, filename)
+    storage = get_file_storage()
+    if content is None:
+        if not file_path:
+            raise ValueError("Missing file content")
+        content = storage.read(file_path)
+
+    parsed = _parse_east_content(
+        content,
+        filename,
+        sheet_name=sheet_name,
+        header_row_index=header_row_index,
+        column_mapping=column_mapping,
+    )
+    if not parsed.lines:
+        raise ValueError(
+            "לא נמצאו שורות בקובץ — בדוק גליון, שורת כותרות ומיפוי עמודות (MPN + מחיר יחידה)"
+        )
     quote_supplier_name = (supplier_name or "").strip() or _derive_quote_supplier_label(parsed, filename)
     now = datetime.now(timezone.utc)
 
@@ -185,8 +275,9 @@ def upload_east_quote(
         .values(is_active=False, status="archived", updated_at=now)
     )
 
-    storage = get_file_storage()
-    stored = storage.save(content, filename or "east-quote.xlsx", subdir="east-quotes")
+    if file_path is None:
+        stored = storage.save(content, filename or "east-quote.xlsx", subdir="east-quotes")
+        file_path = stored.path
 
     quote = SupplierQuote(
         project_id=project_id,
@@ -247,6 +338,9 @@ def upload_east_quote(
     db.flush()
     match_summary = match_east_quote_lines(db, quote.id, bom_version_id)
 
+    if enable_integrated_pricing:
+        version.include_east_pricing = True
+
     log_activity(
         db,
         user_id=user_id,
@@ -273,6 +367,7 @@ def upload_east_quote(
         "dnp_count": match_summary.get("dnp", 0),
         "match_summary": match_summary,
         "is_active": True,
+        "include_east_pricing_enabled": bool(version.include_east_pricing),
     }
 
 
@@ -370,11 +465,11 @@ def east_offers_by_bom_line(
             "price_break_qty": float(ql.quoted_qty) if ql.quoted_qty else None,
             "match_status": ql.match_status,
             "match_reason": ql.match_reason,
-            "is_exact_match": is_exact and ql.match_status in ("exact_mpn", "matched"),
+            "is_exact_match": is_exact,
             "product_url": None,
             "lead_time": ql.lead_time,
             "currency": ql.currency or "USD",
-            "needs_review": ql.match_status in ("possible_match", "designator_match"),
+            "needs_review": ql.match_status == "possible_match",
             "internal_only": True,
             "source_type": "east_supplier_quote",
             "source_group": "East",

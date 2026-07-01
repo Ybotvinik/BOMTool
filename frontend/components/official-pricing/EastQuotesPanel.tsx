@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { Archive, CheckCircle2, Loader2, Upload } from "lucide-react";
-import { apiDelete, apiEastQuoteUpload, apiPatch } from "@/lib/api";
+import { EastQuoteImportDialog } from "@/components/official-pricing/EastQuoteImportDialog";
+import { apiDelete, apiPatch } from "@/lib/api";
 
 export type EastQuoteRow = {
   id: number;
@@ -27,37 +28,26 @@ type Props = {
   quotes: EastQuoteRow[];
   onChanged: () => void;
   onError: (msg: string | null) => void;
+  onIntegratedModeEnabled?: () => void;
 };
 
-export function EastQuotesPanel({ projectId, versionId, userId, quotes, onChanged, onError }: Props) {
+export function EastQuotesPanel({
+  projectId,
+  versionId,
+  userId,
+  quotes,
+  onChanged,
+  onError,
+  onIntegratedModeEnabled,
+}: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [replaceQuoteId, setReplaceQuoteId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   const activeQuote = quotes.find((q) => q.is_active);
-
-  async function upload(file: File) {
-    if (projectId == null || versionId == null) return;
-    setBusy(true);
-    onError(null);
-    try {
-      await apiEastQuoteUpload({
-        file,
-        projectId,
-        bomVersionId: versionId,
-        replaceExisting,
-        quoteIdToReplace: replaceExisting ? replaceQuoteId ?? undefined : undefined,
-        userId,
-      });
-      onChanged();
-    } catch (e) {
-      onError(String(e).replace(/^Error:\s*/, ""));
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
 
   async function activate(quoteId: number) {
     setBusy(true);
@@ -92,91 +82,141 @@ export function EastQuotesPanel({ projectId, versionId, userId, quotes, onChange
     "inline-flex items-center gap-1 h-7 px-2 rounded-md border border-slate-200 text-[10.5px] bg-white hover:bg-slate-50 disabled:opacity-50";
 
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-2 shrink-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10.5px] font-semibold text-slate-600">העלאת מחירי מזרח</span>
-        <span className="text-[9.5px] text-slate-500">שם הספק נלקח מהקובץ (עמודת Vendor)</span>
-        {activeQuote && (
-          <div className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-[10px]">
-            <CheckCircle2 className="w-3 h-3 text-amber-600" />
-            <span>
-              <strong>{activeQuote.supplier_name}</strong>
-              <span className="text-slate-500 mx-1">·</span>
-              <span className="text-slate-600 truncate max-w-[160px] inline-block align-bottom" title={activeQuote.source_filename ?? ""}>
-                {activeQuote.source_filename}
-              </span>
-              <span className="text-slate-400 mx-1">·</span>
-              <span className="text-amber-800 font-medium">פעיל</span>
-              <span className="text-slate-400 mx-1">·</span>
-              <span className="tabular-nums">{activeQuote.matched_count}/{activeQuote.lines_count} matched</span>
+    <>
+      <div className="rounded-md border border-slate-200 bg-white p-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10.5px] font-semibold text-slate-600">העלאת מחירי מזרח</span>
+          <span className="text-[9.5px] text-slate-500">מיפוי עמודות + התאמה ל-BOM</span>
+          {importSuccess && (
+            <span className="text-[9.5px] text-green-700 bg-green-50 border border-green-200 rounded px-2 py-0.5">
+              {importSuccess}
             </span>
+          )}
+          {activeQuote && (
+            <div className="inline-flex items-center gap-2 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-[10px]">
+              <CheckCircle2 className="w-3 h-3 text-amber-600" />
+              <span>
+                <strong>{activeQuote.supplier_name}</strong>
+                <span className="text-slate-500 mx-1">·</span>
+                <span
+                  className="text-slate-600 truncate max-w-[160px] inline-block align-bottom"
+                  title={activeQuote.source_filename ?? ""}
+                >
+                  {activeQuote.source_filename}
+                </span>
+                {activeQuote.sheet_name && (
+                  <>
+                    <span className="text-slate-400 mx-1">·</span>
+                    <span className="text-slate-500">{activeQuote.sheet_name}</span>
+                  </>
+                )}
+                <span className="text-slate-400 mx-1">·</span>
+                <span className="text-amber-800 font-medium">פעיל</span>
+                <span className="text-slate-400 mx-1">·</span>
+                <span className="tabular-nums">
+                  {activeQuote.matched_count}/{activeQuote.lines_count} matched
+                </span>
+              </span>
+            </div>
+          )}
+          {!activeQuote && quotes.length === 0 && (
+            <span className="text-[9.5px] text-slate-400">אין הצעת מזרח פעילה למנה זו</span>
+          )}
+          <label className="inline-flex items-center gap-1 text-[10px] text-slate-600">
+            <input
+              type="checkbox"
+              checked={replaceExisting}
+              onChange={(e) => setReplaceExisting(e.target.checked)}
+            />
+            החלף קובץ קיים
+          </label>
+          {replaceExisting && quotes.length > 0 && (
+            <select
+              className="h-7 rounded-md border border-slate-200 px-1.5 text-[10.5px] bg-white max-w-[140px]"
+              value={replaceQuoteId ?? ""}
+              onChange={(e) => setReplaceQuoteId(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">בחר הצעה</option>
+              {quotes.map((q) => (
+                <option key={q.id} value={q.id}>
+                  {q.source_filename ?? q.id}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) {
+                setImportSuccess(null);
+                setImportFile(f);
+              }
+              if (fileRef.current) fileRef.current.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className={btn}
+            disabled={busy || projectId == null || versionId == null}
+            onClick={() => fileRef.current?.click()}
+          >
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+            טען הצעת ספק מזרח
+          </button>
+        </div>
+        {quotes.length > 1 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {quotes
+              .filter((q) => !q.is_active)
+              .map((q) => (
+                <div
+                  key={q.id}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-100 bg-slate-50 text-[9px] text-slate-500"
+                >
+                  <span className="truncate max-w-[100px]" title={q.source_filename ?? ""}>
+                    {q.source_filename}
+                  </span>
+                  <span className="tabular-nums">
+                    {q.matched_count}/{q.lines_count}
+                  </span>
+                  <button type="button" className="text-brand hover:underline" onClick={() => activate(q.id)}>
+                    הפעל
+                  </button>
+                  <button type="button" className="text-slate-400 hover:text-red-600" onClick={() => archive(q.id)}>
+                    <Archive className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
           </div>
         )}
-        <label className="inline-flex items-center gap-1 text-[10px] text-slate-600">
-          <input
-            type="checkbox"
-            checked={replaceExisting}
-            onChange={(e) => setReplaceExisting(e.target.checked)}
-          />
-          החלף קובץ קיים
-        </label>
-        {replaceExisting && quotes.length > 0 && (
-          <select
-            className="h-7 rounded-md border border-slate-200 px-1.5 text-[10.5px] bg-white max-w-[140px]"
-            value={replaceQuoteId ?? ""}
-            onChange={(e) => setReplaceQuoteId(e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">בחר הצעה</option>
-            {quotes.map((q) => (
-              <option key={q.id} value={q.id}>
-                {q.source_filename ?? q.id}
-              </option>
-            ))}
-          </select>
-        )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx,.xls"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) upload(f);
+      </div>
+
+      {importFile && projectId != null && versionId != null && (
+        <EastQuoteImportDialog
+          open
+          file={importFile}
+          projectId={projectId}
+          versionId={versionId}
+          userId={userId}
+          replaceExisting={replaceExisting}
+          replaceQuoteId={replaceQuoteId}
+          onClose={() => setImportFile(null)}
+          onError={onError}
+          onImported={(res) => {
+            const matched = res.match_summary?.matched_count ?? 0;
+            setImportSuccess(
+              `יובאו ${res.lines_imported} שורות · ${matched} הותאמו ל-BOM · מצב משולב הופעל`,
+            );
+            setImportFile(null);
+            onChanged();
+            if (res.include_east_pricing_enabled) onIntegratedModeEnabled?.();
           }}
         />
-        <button
-          type="button"
-          className={btn}
-          disabled={busy || projectId == null || versionId == null}
-          onClick={() => fileRef.current?.click()}
-        >
-          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-          טען הצעת ספק מזרח
-        </button>
-      </div>
-      {quotes.length > 1 && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
-          {quotes
-            .filter((q) => !q.is_active)
-            .map((q) => (
-              <div
-                key={q.id}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-slate-100 bg-slate-50 text-[9px] text-slate-500"
-              >
-                <span className="truncate max-w-[100px]" title={q.source_filename ?? ""}>
-                  {q.source_filename}
-                </span>
-                <span className="tabular-nums">{q.matched_count}/{q.lines_count}</span>
-                <button type="button" className="text-brand hover:underline" onClick={() => activate(q.id)}>
-                  הפעל
-                </button>
-                <button type="button" className="text-slate-400 hover:text-red-600" onClick={() => archive(q.id)}>
-                  <Archive className="w-2.5 h-2.5" />
-                </button>
-              </div>
-            ))}
-        </div>
       )}
-    </div>
+    </>
   );
 }

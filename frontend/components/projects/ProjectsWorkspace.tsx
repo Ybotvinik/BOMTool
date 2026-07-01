@@ -25,6 +25,10 @@ import {
   DeleteBatchDialog,
   type DeleteBatchDialogTarget,
 } from "@/components/projects/DeleteBatchDialog";
+import {
+  DeleteProjectDialog,
+  type DeleteProjectDialogTarget,
+} from "@/components/projects/DeleteProjectDialog";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 import { projectOverviewHref } from "@/lib/project-overview";
 import { useCurrentUser } from "@/lib/current-user";
@@ -199,6 +203,16 @@ function openDrive(url: string | null | undefined) {
   window.open(trimmed, "_blank", "noopener,noreferrer");
 }
 
+function projectDeleteStats(project: WorkspaceTreeProject) {
+  const cardCount = project.cards.length;
+  const batchCount = project.cards.reduce((n, c) => n + c.batches.length, 0);
+  const bomItemsCount = project.cards.reduce(
+    (n, c) => n + c.batches.reduce((m, b) => m + b.bom_items_count, 0),
+    0,
+  );
+  return { cardCount, batchCount, bomItemsCount };
+}
+
 type Props = {
   live: boolean;
   onReload: () => void;
@@ -213,7 +227,6 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
   const [projectFilter, setProjectFilter] = useState<ProjectViewFilter>("active");
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const [editRow, setEditRow] = useState<ApiProject | null>(null);
   const [fCustomer, setFCustomer] = useState("");
@@ -236,7 +249,27 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
   const [deleteBatchTarget, setDeleteBatchTarget] = useState<DeleteBatchDialogTarget | null>(null);
   const [deleteBatchError, setDeleteBatchError] = useState<string | null>(null);
   const [deleteBatchBusy, setDeleteBatchBusy] = useState(false);
+  const [deleteProjectTarget, setDeleteProjectTarget] = useState<DeleteProjectDialogTarget | null>(
+    null,
+  );
+  const [deleteProjectError, setDeleteProjectError] = useState<string | null>(null);
+  const [deleteProjectBusy, setDeleteProjectBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [fCustName, setFCustName] = useState("");
+  const [fCustCode, setFCustCode] = useState("");
+  const [newProjectCustomer, setNewProjectCustomer] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [fProjName, setFProjName] = useState("");
+  const [fProjCode, setFProjCode] = useState("");
+  const [fProjStatus, setFProjStatus] = useState("NEW");
+  const [newCardProject, setNewCardProject] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const [fNewCardName, setFNewCardName] = useState("");
 
   useEffect(() => {
     if (!notice) return;
@@ -408,17 +441,130 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
     }
   }
 
-  async function addCard(projectId: number, projectName: string) {
-    const name = window.prompt("שם הכרטיס:", projectName);
-    if (!name?.trim()) return;
-    setBusyKey(`card-${projectId}`);
+  async function saveNewCustomer() {
+    if (!fCustName.trim()) return setActionError("שם לקוח נדרש");
+    setActionBusy(true);
+    setActionError(null);
     try {
-      await apiPost(`/api/projects/${projectId}/cards`, { name: name.trim() }, user.id);
+      const createdName = fCustName.trim();
+      const created = await apiPost<{ id: number; name: string }>(
+        "/api/customers",
+        { name: createdName, code: fCustCode.trim() || null },
+        user.id,
+      );
+      setNewCustomerOpen(false);
+      setFCustName("");
+      setFCustCode("");
+      setProjectFilter("all");
+      setNotice(`הלקוח «${createdName}» נוצר — הוסף פרויקט ראשון`);
+      openNewProject(created.id, created.name);
       await loadWorkspace();
+      onReload();
     } catch (e) {
-      alert(String(e).replace(/^Error:\s*/, ""));
+      setActionError(String(e).replace(/^Error:\s*/, ""));
     } finally {
-      setBusyKey(null);
+      setActionBusy(false);
+    }
+  }
+
+  function openNewProject(customerId: number, customerName: string) {
+    const stamp = Date.now().toString().slice(-5);
+    setActionError(null);
+    setNewProjectCustomer({ id: customerId, name: customerName });
+    setFProjName(`פרויקט חדש ${stamp}`);
+    setFProjCode(`PRJ-${stamp}`);
+    setFProjStatus("NEW");
+  }
+
+  async function saveNewProject() {
+    if (!newProjectCustomer) return;
+    if (!fProjName.trim()) return setActionError("שם פרויקט נדרש");
+    if (!fProjCode.trim()) return setActionError("קוד פרויקט נדרש");
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const customer = newProjectCustomer;
+      const label = fProjName.trim();
+      await apiPost(
+        "/api/projects",
+        {
+          customer_id: customer.id,
+          name: label,
+          code: fProjCode.trim(),
+          status: fProjStatus,
+        },
+        user.id,
+      );
+      setNewProjectCustomer(null);
+      setExpanded((prev) => ({ ...prev, [`customer-${customer.id}`]: true }));
+      setNotice(`הפרויקט «${label}» נוצר תחת ${customer.name}`);
+      await loadWorkspace();
+      onReload();
+    } catch (e) {
+      setActionError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  function openNewCard(projectId: number, projectName: string) {
+    setActionError(null);
+    setNewCardProject({ id: projectId, name: projectName });
+    setFNewCardName(projectName);
+  }
+
+  async function saveNewCard() {
+    if (!newCardProject) return;
+    if (!fNewCardName.trim()) return setActionError("שם כרטיס נדרש");
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const project = newCardProject;
+      const cardName = fNewCardName.trim();
+      await apiPost(`/api/projects/${project.id}/cards`, { name: cardName }, user.id);
+      setNewCardProject(null);
+      setExpanded((prev) => ({ ...prev, [`project-${project.id}`]: true }));
+      setNotice(`הכרטיס «${cardName}» נוצר בפרויקט ${project.name}`);
+      await loadWorkspace();
+      onReload();
+    } catch (e) {
+      setActionError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function addCard(projectId: number, projectName: string) {
+    openNewCard(projectId, projectName);
+  }
+
+  function openDeleteProjectDialog(project: WorkspaceTreeProject, customerName: string) {
+    setDeleteProjectError(null);
+    setDeleteProjectTarget({
+      projectId: project.id,
+      projectName: project.name,
+      projectCode: project.code,
+      customerName,
+      ...projectDeleteStats(project),
+    });
+  }
+
+  async function confirmDeleteProject() {
+    if (!deleteProjectTarget) return;
+    setDeleteProjectBusy(true);
+    setDeleteProjectError(null);
+    try {
+      await apiDelete(`/api/projects/${deleteProjectTarget.projectId}`, user.id);
+      const label = deleteProjectTarget.projectName;
+      setDeleteProjectTarget(null);
+      setEditRow(null);
+      setNotice(`הפרויקט «${label}» נמחק`);
+      await loadWorkspace();
+      onReload();
+    } catch (e) {
+      setDeleteProjectError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setDeleteProjectBusy(false);
     }
   }
 
@@ -471,7 +617,7 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
   if (!live) {
     return (
       <Card className="p-6 text-center text-slate-500 text-[13px]">
-        מצב דמו — חבר את ה-API כדי לראות עץ לקוחות / פרויקטים / כרטיסים / מנות.
+        מצב דמו — חבר את ה-API כדי לנהל לקוחות, פרויקטים, כרטיסים ומנות הרכבה.
       </Card>
     );
   }
@@ -527,6 +673,18 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> טוען…
           </span>
         )}
+        <button
+          type="button"
+          onClick={() => {
+            setActionError(null);
+            setFCustName("");
+            setFCustCode("");
+            setNewCustomerOpen(true);
+          }}
+          className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-slate-200 bg-white text-[12px] font-medium hover:bg-slate-50 shrink-0"
+        >
+          <Plus className="h-3.5 w-3.5" /> לקוח חדש
+        </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
@@ -564,8 +722,8 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                     : projectFilter === "closed"
                       ? "אין פרויקטים סגורים להצגה"
                       : projectFilter === "active"
-                        ? "אין פרויקטים פעילים להצגה"
-                        : "אין פרויקטים להצגה"}
+                        ? "אין פרויקטים פעילים — צור לקוח ופרויקט חדשים"
+                        : "אין לקוחות או פרויקטים — לחץ «לקוח חדש» להתחלה"}
                 </td>
               </tr>
             ) : (
@@ -574,7 +732,7 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                 const cOpen = expanded[cKey] !== false;
                 const rows = [
                   <tr key={cKey} className="border-t border-blue-200 bg-blue-100/90">
-                    <td colSpan={8} className="px-3 py-2.5">
+                    <td colSpan={7} className="px-3 py-2.5">
                       <button
                         type="button"
                         onClick={() => toggle(cKey)}
@@ -593,6 +751,19 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                           · {customer.projects.length} פרויקטים
                         </span>
                       </button>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-center">
+                        <button
+                          type="button"
+                          title="פרויקט חדש תחת לקוח זה"
+                          onClick={() => openNewProject(customer.id, customer.name)}
+                          className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-brand text-brand-fg text-[11px] font-semibold hover:bg-brand/90"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          פרויקט חדש
+                        </button>
+                      </div>
                     </td>
                   </tr>,
                 ];
@@ -645,9 +816,8 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                           <button
                             type="button"
                             title="כרטיס חדש"
-                            disabled={busyKey === `card-${project.id}`}
                             onClick={() => addCard(project.id, project.name)}
-                            className="h-7 w-7 rounded-md hover:bg-white flex items-center justify-center text-slate-500 hover:text-brand border border-transparent hover:border-slate-200 disabled:opacity-50"
+                            className="h-7 w-7 rounded-md hover:bg-white flex items-center justify-center text-slate-500 hover:text-brand border border-transparent hover:border-slate-200"
                           >
                             <Layers className="h-3.5 w-3.5" />
                           </button>
@@ -658,6 +828,14 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                             className="h-7 w-7 rounded-md hover:bg-white flex items-center justify-center text-slate-500 hover:text-brand"
                           >
                             <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            title="מחיקת פרויקט"
+                            onClick={() => openDeleteProjectDialog(project, customer.name)}
+                            className="h-7 w-7 rounded-md hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-600 border border-transparent hover:border-red-200"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
                       </td>
@@ -804,6 +982,174 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
         </table>
       </Card>
 
+      {newCustomerOpen && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
+          <div dir="rtl" className="w-full max-w-md rounded-lg bg-white shadow-xl border border-slate-200">
+            <div className="px-4 py-3 border-b border-slate-200 text-[14px] font-semibold text-navy">לקוח חדש</div>
+            <div className="p-4 space-y-3">
+              {actionError && (
+                <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-[12px] px-3 py-2">
+                  {actionError}
+                </div>
+              )}
+              <div>
+                <label className="block text-[12px] text-slate-600 mb-1">שם לקוח *</label>
+                <input
+                  value={fCustName}
+                  onChange={(e) => setFCustName(e.target.value)}
+                  className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] text-slate-600 mb-1">קוד לקוח</label>
+                <input
+                  value={fCustCode}
+                  onChange={(e) => setFCustCode(e.target.value)}
+                  className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                />
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200 flex justify-start gap-2">
+              <button
+                onClick={() => void saveNewCustomer()}
+                disabled={actionBusy}
+                className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+              >
+                {actionBusy ? "יוצר..." : "יצירה"}
+              </button>
+              <button
+                onClick={() => {
+                  setNewCustomerOpen(false);
+                  setActionError(null);
+                }}
+                disabled={actionBusy}
+                className="h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] hover:bg-slate-50"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newProjectCustomer && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
+          <div dir="rtl" className="w-full max-w-md rounded-lg bg-white shadow-xl border border-slate-200">
+            <div className="px-4 py-3 border-b border-slate-200 text-[14px] font-semibold text-navy">
+              פרויקט חדש — {newProjectCustomer.name}
+            </div>
+            <div className="p-4 space-y-3">
+              {actionError && (
+                <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-[12px] px-3 py-2">
+                  {actionError}
+                </div>
+              )}
+              <div>
+                <label className="block text-[12px] text-slate-600 mb-1">שם פרויקט *</label>
+                <input
+                  value={fProjName}
+                  onChange={(e) => setFProjName(e.target.value)}
+                  className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                  autoFocus
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[12px] text-slate-600 mb-1">קוד פרויקט *</label>
+                  <input
+                    value={fProjCode}
+                    onChange={(e) => setFProjCode(e.target.value)}
+                    className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] text-slate-600 mb-1">סטטוס</label>
+                  <select
+                    value={fProjStatus}
+                    onChange={(e) => setFProjStatus(e.target.value)}
+                    className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
+                  >
+                    {PROJECT_STATUS_OPTIONS.map((sv) => (
+                      <option key={sv} value={sv}>
+                        {PROJECT_STATUS_LABELS[sv] ?? sv}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200 flex justify-start gap-2">
+              <button
+                onClick={() => void saveNewProject()}
+                disabled={actionBusy}
+                className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+              >
+                {actionBusy ? "יוצר..." : "יצירה"}
+              </button>
+              <button
+                onClick={() => {
+                  setNewProjectCustomer(null);
+                  setActionError(null);
+                }}
+                disabled={actionBusy}
+                className="h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] hover:bg-slate-50"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newCardProject && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
+          <div dir="rtl" className="w-full max-w-md rounded-lg bg-white shadow-xl border border-slate-200">
+            <div className="px-4 py-3 border-b border-slate-200 text-[14px] font-semibold text-navy">
+              כרטיס חדש — {newCardProject.name}
+            </div>
+            <div className="p-4 space-y-3">
+              {actionError && (
+                <div className="rounded-md border border-red-200 bg-red-50 text-red-700 text-[12px] px-3 py-2">
+                  {actionError}
+                </div>
+              )}
+              <div>
+                <label className="block text-[12px] text-slate-600 mb-1">שם כרטיס *</label>
+                <input
+                  value={fNewCardName}
+                  onChange={(e) => setFNewCardName(e.target.value)}
+                  className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px]"
+                  autoFocus
+                />
+              </div>
+              <p className="text-[10px] text-slate-500">
+                לאחר יצירת הכרטיס ניתן לפתוח מנות הרכבה (BOM) תחתיו.
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200 flex justify-start gap-2">
+              <button
+                onClick={() => void saveNewCard()}
+                disabled={actionBusy}
+                className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+              >
+                {actionBusy ? "יוצר..." : "יצירה"}
+              </button>
+              <button
+                onClick={() => {
+                  setNewCardProject(null);
+                  setActionError(null);
+                }}
+                disabled={actionBusy}
+                className="h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] hover:bg-slate-50"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editRow && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4">
           <div dir="rtl" className="w-full max-w-lg rounded-lg bg-white shadow-xl border border-slate-200">
@@ -905,20 +1251,46 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                 />
               </div>
             </div>
-            <div className="px-4 py-3 border-t border-slate-200 flex justify-start gap-2">
+            <div className="px-4 py-3 border-t border-slate-200 flex justify-between gap-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={saveEdit}
+                  disabled={actionBusy}
+                  className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+                >
+                  {actionBusy ? "שומר..." : "שמירה"}
+                </button>
+                <button
+                  onClick={() => setEditRow(null)}
+                  disabled={actionBusy}
+                  className="h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] hover:bg-slate-50"
+                >
+                  ביטול
+                </button>
+              </div>
               <button
-                onClick={saveEdit}
+                type="button"
                 disabled={actionBusy}
-                className="h-9 px-4 rounded-md bg-brand text-brand-fg text-[12.5px] font-medium hover:bg-brand/90 disabled:opacity-60"
+                onClick={() => {
+                  const customer = customers.find((c) => c.id === editRow.customer_id);
+                  const treeProject = workspace?.customers
+                    .flatMap((c) => c.projects)
+                    .find((p) => p.id === editRow.id);
+                  openDeleteProjectDialog(
+                    treeProject ?? {
+                      id: editRow.id,
+                      name: editRow.name,
+                      code: editRow.code,
+                      status: editRow.status,
+                      drive_folder_url: editRow.drive_folder_url,
+                      cards: [],
+                    },
+                    customer?.name ?? "—",
+                  );
+                }}
+                className="h-9 px-3 rounded-md text-[12px] text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 disabled:opacity-60"
               >
-                {actionBusy ? "שומר..." : "שמירה"}
-              </button>
-              <button
-                onClick={() => setEditRow(null)}
-                disabled={actionBusy}
-                className="h-9 px-4 rounded-md border border-slate-200 bg-white text-[12.5px] hover:bg-slate-50"
-              >
-                ביטול
+                מחק פרויקט
               </button>
             </div>
           </div>
@@ -1021,6 +1393,18 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
             onReload();
             setNotice("מנה חדשה נוצרה בהצלחה");
           }}
+        />
+      )}
+
+      {deleteProjectTarget && (
+        <DeleteProjectDialog
+          target={deleteProjectTarget}
+          busy={deleteProjectBusy}
+          error={deleteProjectError}
+          onClose={() => {
+            if (!deleteProjectBusy) setDeleteProjectTarget(null);
+          }}
+          onConfirm={() => void confirmDeleteProject()}
         />
       )}
 

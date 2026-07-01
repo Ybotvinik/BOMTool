@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2,
   RefreshCw,
@@ -30,16 +30,17 @@ import {
   type WorkbenchSummary,
   type PricingComparison,
 } from "@/components/official-pricing/types";
+import { CardBatchScopeBar } from "@/components/project/CardBatchScopeBar";
 import { apiDownloadPost, apiGet, apiPatch, apiPost, triggerBlobDownload } from "@/lib/api";
+import { formatBatchLabel } from "@/lib/project-overview";
+import { useProjectBatchScope } from "@/lib/use-project-batch-scope";
 import { useCurrentUser } from "@/lib/current-user";
 import {
   readLastOfficialPricingProjectId,
-  readLastOfficialPricingVersionId,
   saveOfficialPricingContext,
 } from "@/lib/official-pricing-context";
 
 type ApiProject = { id: number; name: string };
-type ApiVersion = { id: number; version_label: string; version_name: string | null; is_active: boolean };
 
 type WorkbenchResponse = {
   project_id: number;
@@ -101,7 +102,24 @@ function CompactKpi({
   );
 }
 
-function SourceBadge({ source, internal }: { source: string; internal?: boolean }) {
+function resolveSourceDisplay(ln: WorkbenchLine): { label: string; variant: "tbd" | "error" | "pending" | "normal" } {
+  if (ln.source !== "TBD") return { label: ln.source, variant: "normal" };
+  const api = ln.offers?.filter((o) => !o.internal_only) ?? [];
+  if (api.some((o) => o.match_status === "error")) {
+    return { label: "שגיאת API", variant: "error" };
+  }
+  if (api.some((o) => o.match_status === "not_fetched")) {
+    return { label: "לא נמשך", variant: "pending" };
+  }
+  if (api.some((o) => (o.match_status === "not_found" || o.match_status === "error") && o.unit_price == null)) {
+    return { label: "ללא מחיר", variant: "pending" };
+  }
+  return { label: "TBD", variant: "tbd" };
+}
+
+function SourceBadge({ line }: { line: WorkbenchLine }) {
+  const { label, variant } = resolveSourceDisplay(line);
+  const internal = line.source_is_internal;
   const map: Record<string, string> = {
     "Digi-Key": "bg-blue-50 text-blue-700 border-blue-200",
     Mouser: "bg-violet-50 text-violet-700 border-violet-200",
@@ -110,17 +128,24 @@ function SourceBadge({ source, internal }: { source: string; internal?: boolean 
     Manual: "bg-sky-50 text-sky-700 border-sky-200",
     TBD: "bg-slate-100 text-slate-600 border-slate-300",
     DNP: "bg-slate-200 text-slate-500 border-slate-300",
+    "שגיאת API": "bg-red-50 text-red-700 border-red-200",
+    "לא נמשך": "bg-amber-50 text-amber-800 border-amber-200",
+    "ללא מחיר": "bg-amber-50 text-amber-800 border-amber-200",
   };
   const style =
-    map[source] ??
-    (internal
-      ? "bg-amber-50 text-amber-800 border-amber-200"
-      : source.startsWith("Manual")
-        ? map.Manual
-        : "bg-slate-100 text-slate-700 border-slate-200");
+    map[label] ??
+    (variant === "error"
+      ? map["שגיאת API"]
+      : variant === "pending"
+        ? map["לא נמשך"]
+        : internal
+          ? "bg-amber-50 text-amber-800 border-amber-200"
+          : label.startsWith("Manual")
+            ? map.Manual
+            : "bg-slate-100 text-slate-700 border-slate-200");
   return (
     <span className="inline-flex items-center gap-0.5 flex-wrap" title="מקור המחיר שנבחר לשורת BOM זו">
-      <Badge className={style}>{source}</Badge>
+      <Badge className={style}>{label}</Badge>
       {internal && (
         <>
           <span className="text-[8px] px-1 py-px rounded bg-amber-100 text-amber-800 border border-amber-200 leading-tight">
@@ -234,14 +259,16 @@ export default function OfficialPricingPage() {
 }
 
 function OfficialPricingPageInner() {
-  const urlProjectId = useSearchParams().get("project_id");
-  const urlVersionId = useSearchParams().get("version_id");
-  const activeTab = (useSearchParams().get("tab") as OfficialPricingTab | null) ?? "workbench";
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlProjectId = searchParams.get("project_id");
+  const urlCardId = searchParams.get("card_id");
+  const urlVersionId = searchParams.get("version_id");
+  const activeTab = (searchParams.get("tab") as OfficialPricingTab | null) ?? "workbench";
   const { user } = useCurrentUser();
 
   const [projects, setProjects] = useState<ApiProject[]>([]);
   const [projectId, setProjectId] = useState<number | null>(null);
-  const [versions, setVersions] = useState<ApiVersion[]>([]);
   const [versionId, setVersionId] = useState<number | null>(null);
 
   const [config, setConfig] = useState<ConfigStatus | null>(null);
@@ -257,9 +284,12 @@ function OfficialPricingPageInner() {
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingWorkbench, setLoadingWorkbench] = useState(false);
+  const [qtySaving, setQtySaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [drawerLine, setDrawerLine] = useState<WorkbenchLine | null>(null);
+  const [fetchingSupplier, setFetchingSupplier] = useState<string | null>(null);
+  const [fetchingLineAll, setFetchingLineAll] = useState(false);
   const [mpnEditLine, setMpnEditLine] = useState<WorkbenchLine | null>(null);
   const [mpnOverride, setMpnOverride] = useState("");
   const [manualLine, setManualLine] = useState<WorkbenchLine | null>(null);
@@ -301,33 +331,103 @@ function OfficialPricingPageInner() {
     apiGet<ConfigStatus>("/api/official-pricing/status").then(setConfig).catch(() => setConfig(null));
   }, [urlProjectId]);
 
+  const scope = useProjectBatchScope(projectId, urlCardId, urlVersionId);
+
   useEffect(() => {
-    if (projectId == null) return;
-    const savedVersionId = readLastOfficialPricingVersionId(projectId);
-    apiGet<ApiVersion[]>(`/api/bom-versions?project_id=${projectId}`).then((vs) => {
-      setVersions(vs);
-      const fromUrl =
-        urlVersionId != null ? vs.find((v) => String(v.id) === urlVersionId) : undefined;
-      const fromSaved =
-        savedVersionId != null ? vs.find((v) => v.id === savedVersionId) : undefined;
-      const active = vs.find((v) => v.is_active) ?? vs[vs.length - 1];
-      setVersionId((fromUrl ?? fromSaved ?? active)?.id ?? null);
-    });
-  }, [projectId, urlVersionId]);
+    if (scope.loading || projectId == null) return;
+
+    // Fill defaults only when card/version missing from URL — never override user selection.
+    if ((!urlCardId || !urlVersionId) && scope.cardId != null && scope.versionId != null) {
+      const q = new URLSearchParams(searchParams.toString());
+      q.set("project_id", String(projectId));
+      if (!urlCardId) q.set("card_id", String(scope.cardId));
+      if (!urlVersionId) q.set("version_id", String(scope.versionId));
+      if (activeTab !== "workbench") q.set("tab", activeTab);
+      router.replace(`/official-pricing?${q.toString()}`);
+      return;
+    }
+
+    setVersionId(scope.versionId);
+  }, [
+    scope.loading,
+    scope.versionId,
+    scope.cardId,
+    projectId,
+    urlCardId,
+    urlVersionId,
+    searchParams,
+    router,
+    activeTab,
+  ]);
 
   useEffect(() => {
     if (projectId != null) saveOfficialPricingContext(projectId, versionId);
   }, [projectId, versionId]);
+
+  function pushScope(next: { cardId: number; versionId: number | null }) {
+    if (projectId == null) return;
+    const q = new URLSearchParams(searchParams.toString());
+    q.set("project_id", String(projectId));
+    q.set("card_id", String(next.cardId));
+    if (next.versionId != null) q.set("version_id", String(next.versionId));
+    else q.delete("version_id");
+    if (activeTab !== "workbench") q.set("tab", activeTab);
+    router.replace(`/official-pricing?${q.toString()}`);
+  }
+
+  function selectCard(cardId: number) {
+    const batchId = scope.defaultBatchForCard(cardId);
+    pushScope({ cardId, versionId: batchId });
+  }
+
+  function selectBatch(batchId: number) {
+    const card = scope.overview?.cards.find((c) => c.batches.some((b) => b.id === batchId));
+    if (!card) return;
+    pushScope({ cardId: card.id, versionId: batchId });
+  }
+
+  function selectProject(nextProjectId: number) {
+    setProjectId(nextProjectId);
+    const q = new URLSearchParams(searchParams.toString());
+    q.set("project_id", String(nextProjectId));
+    q.delete("card_id");
+    q.delete("version_id");
+    if (activeTab !== "workbench") q.set("tab", activeTab);
+    router.replace(`/official-pricing?${q.toString()}`);
+  }
+
+  async function saveBatchQuantity(qty: number) {
+    if (versionId == null) return;
+    setQtySaving(true);
+    setError(null);
+    try {
+      await apiPatch(`/api/bom-versions/${versionId}`, { build_quantity: qty }, user.id);
+      await scope.reload();
+      await loadWorkbench();
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setQtySaving(false);
+    }
+  }
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
   );
 
-  const selectedVersion = useMemo(
-    () => versions.find((v) => v.id === versionId) ?? null,
-    [versions, versionId],
-  );
+  const scopeSubtitle = useMemo(() => {
+    if (!scope.selectedCard) return null;
+    const batchPart = scope.selectedBatch
+      ? formatBatchLabel(scope.selectedBatch)
+      : "אין מנה";
+    const qty = scope.selectedBatch?.build_quantity;
+    const qtyPart = qty != null ? ` · ×${qty.toLocaleString()} יח'` : "";
+    return `${scope.selectedCard.name} · ${batchPart}${qtyPart}`;
+  }, [scope.selectedCard, scope.selectedBatch]);
+
+  const batchBuildQuantity = scope.selectedBatch?.build_quantity ?? null;
+  const cardDefaultQuantity = scope.selectedCard?.build_quantity ?? null;
 
   const loadWorkbench = useCallback(async () => {
     if (projectId == null || versionId == null) return;
@@ -550,9 +650,14 @@ function OfficialPricingPageInner() {
     await loadWorkbench();
   }
 
-  async function refetchLine(ln: WorkbenchLine) {
+  async function refetchLine(ln: WorkbenchLine, suppliers?: string[]) {
     if (projectId == null || versionId == null) return;
+    const supplierList = suppliers ?? selectedSuppliers;
+    const single = suppliers?.length === 1 ? suppliers[0] : null;
+    if (single) setFetchingSupplier(single);
+    else setFetchingLineAll(true);
     setBusy(true);
+    setError(null);
     try {
       const row = await apiPost<WorkbenchLine>(
         "/api/official-pricing/workbench/fetch-line",
@@ -560,7 +665,7 @@ function OfficialPricingPageInner() {
           project_id: projectId,
           bom_version_id: versionId,
           bom_line_id: ln.bom_line_id,
-          suppliers: selectedSuppliers,
+          suppliers: supplierList,
         },
         user.id,
       );
@@ -570,38 +675,22 @@ function OfficialPricingPageInner() {
       setError(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setBusy(false);
+      setFetchingSupplier(null);
+      setFetchingLineAll(false);
     }
   }
 
   return (
-    <div className="flex flex-col gap-1 min-h-0 -mt-2 h-[calc(100vh-7rem)] overflow-hidden">
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-3 shrink-0">
-        <div className="min-w-0 justify-self-start">
-          <h1 className="text-[15px] font-bold text-navy tracking-tight leading-none">מחירון BOM מספקים</h1>
-        </div>
-
-        <div className="min-w-0 text-center px-2">
-          {selectedProject ? (
-            <>
-              <div
-                className="text-[22px] font-bold text-navy leading-tight truncate"
-                title={selectedProject.name}
-              >
-                {selectedProject.name}
-              </div>
-              {activeTab === "workbench" && selectedVersion && (
-                <div className="mt-0.5 text-[13px] font-medium text-slate-600 truncate" title={selectedVersion.version_name ?? undefined}>
-                  {selectedVersion.version_label}
-                  {selectedVersion.version_name ? ` · ${selectedVersion.version_name}` : ""}
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-[13px] text-slate-500">טוען פרויקט…</p>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-1.5 justify-self-end">
+    <div className="flex flex-col gap-0.5 min-h-0 -mt-2 h-[calc(100vh-7rem)] overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <h1 className="text-[13px] font-bold text-navy tracking-tight">מחירון BOM מספקים</h1>
+        {selectedProject && (
+          <p className="text-[12px] font-semibold text-slate-700 truncate max-w-[50%]" title={scopeSubtitle ?? selectedProject.name}>
+            {selectedProject.name}
+            {activeTab === "workbench" && scopeSubtitle ? ` · ${scopeSubtitle}` : ""}
+          </p>
+        )}
+        <div className="flex gap-1.5 ms-auto">
         {activeTab === "workbench" && (
           <>
             <button
@@ -634,8 +723,27 @@ function OfficialPricingPageInner() {
         tabs={[...OFFICIAL_PRICING_TABS]}
         activeTab={activeTab}
         basePath="/official-pricing"
-        query={{ project_id: projectId, version_id: versionId }}
+        query={{ project_id: projectId, card_id: scope.cardId, version_id: versionId }}
       />
+
+      {activeTab === "workbench" && projectId != null && (
+        <CardBatchScopeBar
+          variant="inline"
+          overview={scope.overview}
+          cardId={scope.cardId}
+          versionId={scope.versionId}
+          loading={scope.loading || loadingWorkbench}
+          onCardChange={selectCard}
+          onBatchChange={selectBatch}
+          projects={projects}
+          projectId={projectId}
+          onProjectChange={selectProject}
+          buildQuantity={batchBuildQuantity}
+          cardDefaultQuantity={cardDefaultQuantity}
+          onSaveBuildQuantity={saveBatchQuantity}
+          savingQty={qtySaving}
+        />
+      )}
 
       {activeTab === "component-check" ? (
         <SingleComponentCheckPanel config={config} />
@@ -660,7 +768,7 @@ function OfficialPricingPageInner() {
 
       {error && <div className="px-2 py-0.5 rounded-md border border-red-200 bg-red-50 text-red-800 text-[11px] shrink-0">{error}</div>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(280px,360px)_1fr] gap-2 shrink-0">
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
         <PricingModeSwitch
           includeEast={includeEast}
           versionId={versionId}
@@ -670,32 +778,31 @@ function OfficialPricingPageInner() {
           onError={setError}
           disabled={busy}
         />
-        <EastQuotesPanel
-          projectId={projectId}
-          versionId={versionId}
-          userId={user.id}
-          quotes={eastQuotes}
-          onChanged={() => loadWorkbench().catch(() => {})}
-          onError={setError}
-        />
+        <div className="flex-1 min-w-[200px]">
+          <EastQuotesPanel
+            projectId={projectId}
+            versionId={versionId}
+            userId={user.id}
+            quotes={eastQuotes}
+            onChanged={() => loadWorkbench().catch(() => {})}
+            onError={setError}
+            onIntegratedModeEnabled={() => {
+              setIncludeEast(true);
+              loadWorkbench().catch(() => {});
+            }}
+          />
+        </div>
       </div>
 
-      <PricingComparisonCards comparison={pricingComparison} activeModeEast={includeEast} />
+      <PricingComparisonCards
+        comparison={pricingComparison}
+        activeModeEast={includeEast}
+        buildQuantity={batchBuildQuantity}
+        summary={summary}
+      />
 
       <Card className="p-1.5 flex flex-col min-h-0 flex-1 overflow-hidden">
         <div className="flex flex-wrap items-center gap-1.5 mb-1 shrink-0">
-          <select className={`${selCompact} min-w-[120px] flex-1 max-w-[180px]`} title="פרויקט" value={projectId ?? ""} onChange={(e) => setProjectId(Number(e.target.value))}>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-          <select className={`${selCompact} min-w-[120px] flex-1 max-w-[180px]`} title="גרסת BOM" value={versionId ?? ""} onChange={(e) => setVersionId(Number(e.target.value))}>
-            {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.version_name || v.version_label}{v.is_active ? " ★" : ""}
-              </option>
-            ))}
-          </select>
           <select className={`${selCompact} w-[108px]`} title="מצב משיכה" value={mode} onChange={(e) => setMode(e.target.value as "all" | "missing_only")}>
             <option value="all">כל השורות</option>
             <option value="missing_only">חסרות מחיר</option>
@@ -733,30 +840,26 @@ function OfficialPricingPageInner() {
         </div>
 
         {summary && (
-          <div className="flex flex-wrap items-center gap-1 mb-1 shrink-0">
+          <div className="flex flex-wrap items-center gap-1 mb-0.5 shrink-0">
             <CompactKpi label="Has Solution" value={String(summary.has_solution)} tone="good" />
             <CompactKpi label="Needs Approval" value={String(summary.needs_approval)} tone="warn" />
             <CompactKpi label="No Solution" value={String(summary.no_solution)} tone="bad" />
-            <CompactKpi label="DNP" value={String(summary.dnp)} tone="muted" />
             <CompactKpi label="No Stock" value={String(noStockCount)} tone="warn" />
             {snapshot && (
               <>
                 <span className="text-slate-200 mx-0.5">|</span>
-                <CompactKpi label="Last Snapshot Total" value={fmtPrice(snapshot.official_components_total)} tone="muted" />
-                <CompactKpi label="Last Snapshot Priced" value={String(snapshot.priced_count)} tone="good" />
-                <CompactKpi label="Last Snapshot Missing" value={String(snapshot.missing_price_count)} tone="warn" />
-                <CompactKpi label="Last Snapshot Needs Review" value={String(snapshot.needs_review_count)} tone="warn" />
+                <CompactKpi label="Snapshot" value={fmtPrice(snapshot.official_components_total)} tone="muted" />
               </>
             )}
-            <span className="text-[10px] text-slate-400 ms-auto tabular-nums">
+            <span className="text-[9.5px] text-slate-400 ms-auto tabular-nums">
               {filtered.length !== lines.length
-                ? `מציג ${filtered.length} מתוך ${lines.length} שורות`
+                ? `${filtered.length}/${lines.length}`
                 : `${lines.length} שורות`}
             </span>
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-1 mb-1 pb-1 border-b border-slate-100 shrink-0">
+        <div className="flex flex-wrap items-center gap-1 mb-0.5 pb-0.5 border-b border-slate-100 shrink-0">
           <input
             className={`${selCompact} w-36`}
             value={snapshotName}
@@ -851,7 +954,7 @@ function OfficialPricingPageInner() {
                   <td className="py-1 px-1.5 tabular-nums align-top">{ln.required_qty ?? "—"}</td>
                   <td className="py-1 px-1.5 align-top text-center">{ln.dnp ? "✓" : "—"}</td>
                   <td className="py-1 px-1.5 align-top">
-                    <SourceBadge source={ln.source} internal={ln.source_is_internal} />
+                    <SourceBadge line={ln} />
                   </td>
                   <td className="py-1 px-1.5 align-top font-mono text-[10px] truncate" title={ln.supplier_part_number ?? undefined}>{ln.supplier_part_number ?? "—"}</td>
                   <td className="py-1 px-1.5 align-top tabular-nums">{fmtPrice(ln.unit_price, ln.currency)}</td>
@@ -887,8 +990,16 @@ function OfficialPricingPageInner() {
       <SupplierOffersDrawer
         line={drawerLine}
         includeEast={includeEast}
+        fetchingSupplier={fetchingSupplier}
+        fetchingAll={fetchingLineAll}
         onClose={() => setDrawerLine(null)}
         onSelectSupplier={selectOffer}
+        onFetchSupplier={(supplier) => {
+          if (drawerLine) void refetchLine(drawerLine, [supplier]);
+        }}
+        onFetchAllSuppliers={() => {
+          if (drawerLine) void refetchLine(drawerLine, selectedSuppliers);
+        }}
         onSelectTbd={() => selectSpecial("tbd")}
         onSelectDnp={() => selectSpecial("dnp")}
         onOpenManual={() => {

@@ -61,6 +61,7 @@ type Metrics = {
   bom_error_count: number;
   bom_warning_count: number;
   official_selected_total: number | null;
+  official_selected_unit_cost?: number | null;
   official_has_solution: number;
   official_needs_approval: number;
   official_no_solution: number;
@@ -71,6 +72,7 @@ type Metrics = {
   official_snapshot_id: number | null;
   official_snapshot_name: string | null;
   official_snapshot_total: number | null;
+  official_snapshot_unit_cost?: number | null;
   official_snapshot_created_at: string | null;
   latest_customer_export_at: string | null;
   latest_procurement_export_at: string | null;
@@ -106,10 +108,13 @@ function fmtDate(iso: string | null | undefined) {
 
 function fmtMoney(v: number | null | undefined) {
   if (v == null) return "—";
+  const abs = Math.abs(v);
+  const maxDigits = abs > 0 && abs < 10 ? 2 : abs < 1000 ? 2 : 0;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: maxDigits > 0 ? 2 : 0,
+    maximumFractionDigits: maxDigits > 0 ? 2 : 0,
   }).format(v);
 }
 
@@ -425,15 +430,29 @@ function ProjectOverviewInner() {
   const versionId = scopeVersionId ?? metrics?.selected_version_id ?? project.active_version_id;
   const selectedCard = overview.cards.find((c) => c.id === scopeCardId) ?? null;
   const bomHref =
-    versionId != null ? `/bom?project_id=${pid}&version_id=${versionId}` : `/bom?project_id=${pid}`;
+    versionId != null
+      ? `/bom?project_id=${pid}${scopeCardId != null ? `&card_id=${scopeCardId}` : ""}&version_id=${versionId}`
+      : `/bom?project_id=${pid}`;
   const qualityHref =
     versionId != null
       ? `/bom?project_id=${pid}&version_id=${versionId}&tab=quality`
       : `/bom?project_id=${pid}&tab=quality`;
   const pricingHref =
     versionId != null
-      ? `/official-pricing?project_id=${pid}&version_id=${versionId}`
+      ? `/official-pricing?project_id=${pid}${scopeCardId != null ? `&card_id=${scopeCardId}` : ""}&version_id=${versionId}`
       : `/official-pricing?project_id=${pid}`;
+
+  const batchQty = metrics?.effective_build_quantity ?? metrics?.batch_build_quantity ?? 1;
+  const unitCost =
+    metrics?.official_selected_unit_cost ??
+    (metrics?.official_selected_total != null && batchQty > 0
+      ? metrics.official_selected_total / batchQty
+      : null);
+  const snapshotUnitCost =
+    metrics?.official_snapshot_unit_cost ??
+    (metrics?.official_snapshot_total != null && batchQty > 0
+      ? metrics.official_snapshot_total / batchQty
+      : null);
   const exportHref = `/export?project_id=${pid}${versionId != null ? `&bom_version_id=${versionId}` : ""}`;
 
   const paramsForm: ProjectParamsForm = {
@@ -554,6 +573,22 @@ function ProjectOverviewInner() {
               ))}
             </div>
             <div className="flex gap-2 shrink-0">
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2 min-w-[130px] text-right">
+                <div className="text-[10px] text-emerald-800 font-medium">עלות כרטיס בודד</div>
+                <div className="text-[22px] font-bold text-emerald-900 tabular-nums leading-tight mt-0.5">
+                  {fmtMoney(unitCost)}
+                </div>
+                <div className="text-[9px] text-emerald-700/80 mt-0.5">לפי מחירון נוכחי</div>
+              </div>
+              <div className="rounded-lg bg-white/80 border border-slate-200 px-4 py-2 min-w-[130px] text-right">
+                <div className="text-[10px] text-slate-600 font-medium">סה״כ רכש למנה</div>
+                <div className="text-[20px] font-bold text-slate-800 tabular-nums leading-tight mt-0.5">
+                  {fmtMoney(metrics.official_selected_total)}
+                </div>
+                <div className="text-[9px] text-slate-500 mt-0.5">
+                  ×{batchQty.toLocaleString()} יח׳
+                </div>
+              </div>
               <div className="rounded-lg bg-brand/10 border border-brand/25 px-4 py-2 min-w-[120px] text-right">
                 <div className="text-[10px] text-brand font-medium">כמות להרכבה</div>
                 <div className="text-[22px] font-bold text-brand tabular-nums leading-tight mt-0.5">
@@ -676,13 +711,20 @@ function ProjectOverviewInner() {
       {/* KPI — Supplier pricing */}
       <div>
         <p className="text-[11px] font-semibold text-slate-500 mb-2 px-0.5">תמחור ספקים</p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           <DashKpi
-            label="בחירה נוכחית"
-            value={fmtMoney(metrics.official_selected_total)}
+            label="עלות כרטיס בודד"
+            value={fmtMoney(unitCost)}
             tone="good"
             icon={<DollarSign className="h-4 w-4" />}
-            hint="סה״כ מחירון נוכחי"
+            hint="עלות רכיבים ליחידה אחת"
+          />
+          <DashKpi
+            label="סה״כ רכש למנה"
+            value={fmtMoney(metrics.official_selected_total)}
+            tone="default"
+            icon={<ShoppingCart className="h-4 w-4" />}
+            hint={`ל-${batchQty.toLocaleString()} יחידות`}
           />
           <DashKpi
             label="שורות מתומחרות"
@@ -707,9 +749,20 @@ function ProjectOverviewInner() {
             tone={(metrics.official_no_stock_count ?? 0) > 0 ? "warn" : "muted"}
           />
           <DashKpi
-            label="Snapshot אחרון"
+            label="Snapshot — ליחידה"
+            value={fmtMoney(snapshotUnitCost)}
+            tone={snapshotUnitCost != null ? "default" : "muted"}
+            icon={<Camera className="h-4 w-4" />}
+            hint={
+              metrics.official_snapshot_name
+                ? metrics.official_snapshot_name
+                : "אין snapshot"
+            }
+          />
+          <DashKpi
+            label="Snapshot — למנה"
             value={fmtMoney(metrics.official_snapshot_total)}
-            tone={metrics.official_snapshot_total != null ? "default" : "muted"}
+            tone={metrics.official_snapshot_total != null ? "muted" : "muted"}
             icon={<Camera className="h-4 w-4" />}
           />
         </div>
@@ -740,12 +793,14 @@ function ProjectOverviewInner() {
             <p className="text-slate-400 py-4 text-center">אין BOM פעיל — טען BOM תחילה</p>
           ) : (
             <dl className="grid grid-cols-2 gap-3">
-              <Stat label="בחירה נוכחית" value={fmtMoney(metrics.official_selected_total)} />
+              <Stat label="עלות כרטיס בודד" value={fmtMoney(unitCost)} tone="good" />
+              <Stat label="סה״כ רכש למנה" value={fmtMoney(metrics.official_selected_total)} />
               <Stat label="יש פתרון" value={metrics.official_has_solution} tone="good" />
               <Stat label="דורש אישור" value={metrics.official_needs_approval} tone="warn" />
               <Stat label="אין פתרון" value={metrics.official_no_solution} tone="bad" />
               <Stat label="ללא מלאי" value={metrics.official_no_stock_count ?? 0} tone="warn" />
-              <Stat label="Snapshot אחרון" value={metrics.official_snapshot_name ?? "—"} />
+              <Stat label="Snapshot ליחידה" value={fmtMoney(snapshotUnitCost)} />
+              <Stat label="Snapshot למנה" value={fmtMoney(metrics.official_snapshot_total)} />
             </dl>
           )}
         </SectionCard>

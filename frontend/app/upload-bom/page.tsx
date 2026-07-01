@@ -16,6 +16,7 @@ import {
   Rows3,
 } from "lucide-react";
 import { Card, PageHeader, Badge } from "@/components/ui";
+import { ExcelSheetPickerDialog } from "@/components/ExcelSheetPickerDialog";
 import { apiGet, apiBomPreview, apiPost } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
 
@@ -131,6 +132,10 @@ function UploadBomInner() {
   // Track manual edits so re-previews don't clobber a user-entered version name.
   const [versionEdited, setVersionEdited] = useState(false);
   const [targetVersionLabel, setTargetVersionLabel] = useState<string | null>(null);
+  const [pendingSheetPick, setPendingSheetPick] = useState<{
+    preview: Preview;
+    fileName: string;
+  } | null>(null);
 
   const targetVersionId =
     urlVersionId && Number.isFinite(Number(urlVersionId)) ? Number(urlVersionId) : null;
@@ -190,6 +195,46 @@ function UploadBomInner() {
     }
   }
 
+  async function finalizePreview(pv: Preview) {
+    if (pv.sheet_names.length > 1) {
+      setPendingSheetPick({ preview: pv, fileName: pv.file_name });
+      return;
+    }
+    applyPreview(pv);
+  }
+
+  async function confirmSheetPick(sheetName: string) {
+    if (!pendingSheetPick || !canUpload) return;
+    const pid = Number(selectedProjectId);
+    const base = pendingSheetPick.preview;
+    setPendingSheetPick(null);
+    setBusy(true);
+    setError(null);
+    try {
+      if (sheetName !== base.sheet_name) {
+        const pv = await apiBomPreview<Preview>({
+          filePath: base.file_path,
+          sheetName,
+          projectId: pid,
+          userId: user.id,
+        });
+        applyPreview(pv);
+      } else {
+        applyPreview(base);
+      }
+    } catch (e) {
+      setError(String(e));
+      setPreview(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function cancelSheetPick() {
+    setPendingSheetPick(null);
+    setPreview(null);
+  }
+
   async function onFile(file: File | undefined) {
     if (!file) return;
     if (!canUpload) {
@@ -199,6 +244,7 @@ function UploadBomInner() {
     const pid = Number(selectedProjectId);
     setError(null);
     setResult(null);
+    setPendingSheetPick(null);
     setBusy(true);
     setVersionEdited(false);
     try {
@@ -207,7 +253,7 @@ function UploadBomInner() {
         projectId: pid,
         userId: user.id,
       });
-      applyPreview(pv);
+      await finalizePreview(pv);
     } catch (e) {
       setError(String(e));
       setPreview(null);
@@ -721,6 +767,17 @@ function UploadBomInner() {
           </Card>
         </div>
       )}
+
+      <ExcelSheetPickerDialog
+        open={pendingSheetPick != null}
+        fileName={pendingSheetPick?.fileName ?? ""}
+        sheetNames={pendingSheetPick?.preview.sheet_names ?? []}
+        defaultSheet={pendingSheetPick?.preview.sheet_name ?? ""}
+        busy={busy}
+        title="בחירת גליון — טעינת BOM"
+        onConfirm={confirmSheetPick}
+        onCancel={cancelSheetPick}
+      />
     </>
   );
 }

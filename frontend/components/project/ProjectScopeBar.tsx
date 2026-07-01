@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { Loader2, Save } from "lucide-react";
 import { StatusBadge } from "@/components/ui";
 import type { OverviewCard, ProjectOverviewContext } from "@/lib/project-overview";
+import { formatBatchLabel } from "@/lib/project-overview";
 
 type Props = {
   overview: ProjectOverviewContext;
@@ -101,7 +102,7 @@ export function ProjectScopeBar({
             ) : (
               selectedCard.batches.map((batch) => (
                 <option key={batch.id} value={batch.id}>
-                  {batch.batch_label ?? batch.version_label}
+                  {formatBatchLabel(batch)}
                   {batch.is_project_active ? " ★" : ""}
                   {batch.bom_items_count ? ` · ${batch.bom_items_count} פריטים` : ""}
                 </option>

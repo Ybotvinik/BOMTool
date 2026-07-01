@@ -33,6 +33,9 @@ from app.schemas.official_pricing import (
     OfficialSnapshotCreateRequest,
     OfficialSnapshotCreateResponse,
     EastQuoteUploadResult,
+    EastQuotePreview,
+    EastQuoteImportRequest,
+    ExcelSheetsDetect,
     IncludeEastPricingRequest,
     SelectOfferRequest,
     SupplierConfigStatus,
@@ -70,9 +73,13 @@ from app.services.suppliers.workbench import (
     save_mpn_override,
     select_line_offer,
 )
+from app.services.bom_parser import list_sheet_names
+from app.services.file_storage import get_file_storage
+from app.schemas.bom_import import CandidateHeaderRow
 from app.services.east_quotes.service import (
     archive_east_quote,
     list_east_quotes,
+    preview_east_quote,
     set_active_quote,
     set_include_east_pricing,
     upload_east_quote,
@@ -468,12 +475,108 @@ def get_east_quotes(
     )
 
 
+@router.post("/east-quotes/preview", response_model=EastQuotePreview)
+async def post_east_quote_preview(
+    file: UploadFile | None = File(default=None),
+    file_path: str | None = Form(default=None),
+    sheet_name: str | None = Form(default=None),
+    header_row_index: int | None = Form(default=None),
+) -> EastQuotePreview:
+    storage = get_file_storage()
+    if file is not None:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="קובץ ריק")
+        stored = storage.save(content, file.filename or "east-quote.xlsx", subdir="east-quotes")
+        path, display_name, source_name = stored.path, stored.file_name, file.filename or "east-quote.xlsx"
+    elif file_path:
+        try:
+            content = storage.read(file_path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="הקובץ לא נמצא; יש להעלות מחדש")
+        path, display_name, source_name = file_path, file_path.split("/")[-1], file_path
+    else:
+        raise HTTPException(status_code=400, detail="יש לספק file או file_path")
+
+    try:
+        data = preview_east_quote(
+            content=content,
+            filename=source_name,
+            sheet_name=sheet_name,
+            header_row_index=header_row_index,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"שגיאת קריאת קובץ: {exc}") from exc
+
+    return EastQuotePreview(
+        file_path=path,
+        file_name=display_name,
+        sheet_name=data["sheet_name"],
+        sheet_names=data["sheet_names"],
+        detected_header_row_index=data["detected_header_row_index"],
+        header_row_index=data["header_row_index"],
+        columns=data["columns"],
+        rows=data["rows"],
+        total_rows=data["total_rows"],
+        candidate_header_rows=[CandidateHeaderRow(**c) for c in data["candidate_header_rows"]],
+        suggested_mapping=data["suggested_mapping"],
+        warning=data["warning"],
+    )
+
+
+@router.post("/east-quotes/import", response_model=EastQuoteUploadResult)
+def post_east_quote_import(
+    payload: EastQuoteImportRequest,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id),
+) -> EastQuoteUploadResult:
+    try:
+        result = upload_east_quote(
+            db,
+            file_path=payload.file_path,
+            filename=payload.file_path.split("/")[-1],
+            project_id=payload.project_id,
+            bom_version_id=payload.bom_version_id,
+            supplier_name=payload.supplier_name,
+            sheet_name=payload.sheet_name,
+            header_row_index=payload.header_row_index,
+            column_mapping=payload.column_mapping,
+            replace_existing=payload.replace_existing,
+            quote_id_to_replace=payload.quote_id_to_replace,
+            enable_integrated_pricing=payload.enable_integrated_pricing,
+            user_id=user_id,
+        )
+        return EastQuoteUploadResult(**result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="הקובץ לא נמצא; יש להעלות מחדש") from exc
+
+
+@router.post("/east-quotes/detect-sheets", response_model=ExcelSheetsDetect)
+async def post_east_quote_detect_sheets(
+    file: UploadFile = File(...),
+) -> ExcelSheetsDetect:
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="קובץ ריק")
+    filename = file.filename or "east-quote.xlsx"
+    try:
+        sheet_names, active_sheet = list_sheet_names(content, filename)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"לא ניתן לקרוא את הקובץ: {exc}") from exc
+    return ExcelSheetsDetect(sheet_names=sheet_names, active_sheet=active_sheet)
+
+
 @router.post("/east-quotes/upload", response_model=EastQuoteUploadResult)
 async def post_east_quote_upload(
     file: UploadFile = File(...),
     project_id: int = Form(...),
     bom_version_id: int = Form(...),
     supplier_name: str | None = Form(default=None),
+    sheet_name: str | None = Form(default=None),
     replace_existing: bool = Form(default=False),
     quote_id_to_replace: int | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -490,6 +593,7 @@ async def post_east_quote_upload(
             project_id=project_id,
             bom_version_id=bom_version_id,
             supplier_name=supplier_name,
+            sheet_name=sheet_name,
             replace_existing=replace_existing,
             quote_id_to_replace=quote_id_to_replace,
             user_id=user_id,

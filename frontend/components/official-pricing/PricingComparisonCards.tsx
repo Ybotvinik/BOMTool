@@ -1,73 +1,49 @@
 "use client";
 
+import type { ReactNode } from "react";
 import clsx from "clsx";
-import { Lock, TrendingDown, TrendingUp } from "lucide-react";
-import { fmtPrice, type PricingComparison } from "./types";
+import { AlertTriangle, Lock, TrendingDown, TrendingUp } from "lucide-react";
+import { fmtPrice, type PricingComparison, type WorkbenchSummary } from "./types";
 
-type ChipVariant = "neutral" | "green" | "amber" | "red" | "blue";
-
-const chipStyles: Record<ChipVariant, string> = {
-  neutral: "bg-slate-50 text-slate-700 border-slate-200",
-  green: "bg-green-50 text-green-800 border-green-200",
-  amber: "bg-amber-50 text-amber-800 border-amber-200",
-  red: "bg-red-50 text-red-700 border-red-200",
-  blue: "bg-blue-50 text-blue-800 border-blue-200",
-};
-
-function MetricChip({
+function MiniChip({
   label,
   value,
-  variant = "neutral",
+  tone = "neutral",
 }: {
   label: string;
   value: string | number;
-  variant?: ChipVariant;
+  tone?: "neutral" | "green" | "amber" | "red" | "blue";
 }) {
+  const toneClass = {
+    neutral: "bg-slate-50 text-slate-700 border-slate-200",
+    green: "bg-green-50 text-green-800 border-green-200",
+    amber: "bg-amber-50 text-amber-800 border-amber-200",
+    red: "bg-red-50 text-red-700 border-red-200",
+    blue: "bg-blue-50 text-blue-800 border-blue-200",
+  }[tone];
   return (
-    <div
+    <span
       className={clsx(
-        "rounded-md border px-1.5 py-1 text-center min-w-0",
-        chipStyles[variant],
+        "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] whitespace-nowrap",
+        toneClass,
       )}
     >
-      <p className="text-[8.5px] leading-tight opacity-80 truncate">{label}</p>
-      <p className="text-[13px] font-bold tabular-nums leading-tight mt-0.5">{value}</p>
-    </div>
+      <span className="opacity-75">{label}</span>
+      <span className="font-bold tabular-nums">{value}</span>
+    </span>
   );
-}
-
-function LabelChip({
-  label,
-  variant = "neutral",
-  icon,
-}: {
-  label: string;
-  variant?: ChipVariant;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <div
-      className={clsx(
-        "rounded-md border px-1.5 py-1.5 flex items-center justify-center gap-1 min-w-0",
-        chipStyles[variant],
-      )}
-    >
-      {icon}
-      <span className="text-[8.5px] font-semibold leading-tight text-center">{label}</span>
-    </div>
-  );
-}
-
-function MetricsGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-2 gap-1 mt-2">{children}</div>;
 }
 
 export function PricingComparisonCards({
   comparison,
   activeModeEast,
+  buildQuantity = null,
+  summary = null,
 }: {
   comparison: PricingComparison | null;
   activeModeEast: boolean;
+  buildQuantity?: number | null;
+  summary?: WorkbenchSummary | null;
 }) {
   if (!comparison) return null;
 
@@ -75,126 +51,187 @@ export function PricingComparisonCards({
   const isSaving = savings.is_saving && savings.amount > 0;
   const isGap = savings.amount < 0;
 
-  const cardBase = "rounded-lg border p-2.5 flex flex-col min-h-[148px]";
+  function unitLabel(total: number) {
+    if (buildQuantity == null || buildQuantity <= 0 || total <= 0) return null;
+    return fmtPrice(total / buildQuantity);
+  }
 
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 shrink-0">
-      {/* Card A — Official only */}
+  const activeTotal = activeModeEast ? east.total : off.total;
+  const activeUnit = unitLabel(activeTotal);
+  const excludedNoSolution = summary?.no_solution ?? 0;
+  const excludedDnp = summary?.dnp ?? 0;
+  const hasGap = excludedNoSolution > 0 || excludedDnp > 0;
+
+  const cardBase = "rounded-md border px-2 py-1.5 flex flex-col min-w-0";
+
+  function ScenarioCard({
+    title,
+    sub,
+    total,
+    active,
+    accent,
+    chips,
+  }: {
+    title: string;
+    sub: string;
+    total: number;
+    active: boolean;
+    accent: "brand" | "amber";
+    chips: ReactNode;
+  }) {
+    const unit = unitLabel(total);
+    return (
       <div
         className={clsx(
           cardBase,
-          !activeModeEast ? "border-brand/40 bg-brand/5 ring-1 ring-brand/20" : "border-slate-200 bg-white",
+          active
+            ? accent === "brand"
+              ? "border-brand/40 bg-brand/5 ring-1 ring-brand/15"
+              : "border-amber-400/50 bg-amber-50/60 ring-1 ring-amber-200/80"
+            : "border-slate-200 bg-white opacity-90",
         )}
       >
-        <div className="flex items-start justify-between gap-1">
+        <div className="flex items-center justify-between gap-1 min-h-[16px]">
           <div className="min-w-0">
-            <p className="text-[12px] font-bold text-navy leading-tight">מחיר רשמי בלבד</p>
-            <p className="text-[8.5px] text-slate-500 mt-0.5 truncate">Digi-Key / Mouser / TI / Manual</p>
+            <p className="text-[10.5px] font-bold text-navy leading-tight truncate">{title}</p>
+            <p className="text-[8px] text-slate-500 truncate">{sub}</p>
           </div>
-          {!activeModeEast && (
-            <span className="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-brand text-white font-medium">
-              פעיל
-            </span>
-          )}
-        </div>
-        <p className="text-[22px] font-bold tabular-nums text-slate-900 mt-1.5 leading-none">
-          {fmtPrice(off.total)}
-        </p>
-        <MetricsGrid>
-          <MetricChip label="שורות מתומחרות" value={off.priced_lines} variant="blue" />
-          <MetricChip label="דורש אישור" value={off.needs_approval} variant="amber" />
-          <MetricChip label="אין פתרון" value={off.no_solution} variant={off.no_solution > 0 ? "red" : "neutral"} />
-          <MetricChip label="ללא מלאי" value={off.no_stock} variant="amber" />
-        </MetricsGrid>
-      </div>
-
-      {/* Card B — With East */}
-      <div
-        className={clsx(
-          cardBase,
-          activeModeEast ? "border-amber-400/50 bg-amber-50/50 ring-1 ring-amber-200" : "border-slate-200 bg-white",
-        )}
-      >
-        <div className="flex items-start justify-between gap-1">
-          <div className="min-w-0">
-            <p className="text-[12px] font-bold text-navy leading-tight">מחיר משולב עם מזרח</p>
-            <p className="text-[8.5px] text-slate-500 mt-0.5 truncate">כולל Link / ספקי מזרח</p>
-          </div>
-          {activeModeEast && (
-            <span className="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-amber-600 text-white font-medium">
-              פעיל
-            </span>
-          )}
-        </div>
-        <p className="text-[22px] font-bold tabular-nums text-slate-900 mt-1.5 leading-none">
-          {fmtPrice(east.total)}
-        </p>
-        <MetricsGrid>
-          <MetricChip label="שורות מתומחרות" value={east.priced_lines} variant="blue" />
-          <MetricChip label="נבחרו מזרח" value={east.east_selected_lines} variant="amber" />
-          <MetricChip label="דורש אישור" value={east.needs_approval} variant="amber" />
-          <MetricChip label="ללא מלאי" value={east.no_stock} variant="amber" />
-        </MetricsGrid>
-      </div>
-
-      {/* Card C — Savings */}
-      <div
-        className={clsx(
-          cardBase,
-          isSaving
-            ? "border-green-200 bg-green-50/60"
-            : isGap
-              ? "border-amber-200 bg-amber-50/40"
-              : "border-slate-200 bg-white",
-        )}
-      >
-        <div className="flex items-start justify-between gap-1">
-          <p className="text-[12px] font-bold text-navy leading-tight">
-            {isSaving ? "חיסכון משוער" : isGap ? "פער / תוספת" : "השוואת תרחישים"}
-          </p>
-          {isSaving && (
-            <span className="shrink-0 text-[8px] px-1.5 py-0.5 rounded bg-green-600 text-white font-medium">
-              חיסכון
-            </span>
-          )}
-        </div>
-        <div className="flex items-baseline gap-2 mt-1.5">
-          {isSaving ? (
-            <TrendingDown className="w-4 h-4 text-green-600 shrink-0" />
-          ) : isGap ? (
-            <TrendingUp className="w-4 h-4 text-amber-600 shrink-0" />
-          ) : null}
-          <p
-            className={clsx(
-              "text-[22px] font-bold tabular-nums leading-none",
-              isSaving ? "text-green-700" : isGap ? "text-amber-700" : "text-slate-800",
-            )}
-          >
-            {fmtPrice(Math.abs(savings.amount))}
-          </p>
-          {savings.percent != null && (
-            <p
+          {active && (
+            <span
               className={clsx(
-                "text-[13px] font-semibold tabular-nums",
-                isSaving ? "text-green-700" : "text-amber-700",
+                "shrink-0 text-[7.5px] px-1 py-px rounded font-medium text-white",
+                accent === "brand" ? "bg-brand" : "bg-amber-600",
               )}
             >
-              {isSaving ? "−" : "+"}
-              {Math.abs(savings.percent).toFixed(1)}%
-            </p>
+              פעיל
+            </span>
           )}
         </div>
-        <MetricsGrid>
-          <MetricChip label="שורות מזרח" value={east.east_selected_lines} variant="amber" />
-          <LabelChip
-            label="פנימי בלבד"
-            variant="amber"
-            icon={<Lock className="w-2.5 h-2.5 shrink-0 opacity-70" />}
-          />
-          <LabelChip label="לעומת רשמי בלבד" variant="blue" />
-          <LabelChip label="לא לדוח לקוח" variant="amber" />
-        </MetricsGrid>
+        {active && unit ? (
+          <div className="mt-1 flex items-baseline gap-2 flex-wrap">
+            <p className="text-[18px] font-bold tabular-nums text-emerald-800 leading-none">{unit}</p>
+            <span className="text-[8px] text-emerald-700/90">ליחידה</span>
+            <span className="text-[10px] font-semibold tabular-nums text-slate-700 ms-auto">
+              {fmtPrice(total)}
+              {buildQuantity != null ? (
+                <span className="text-[8px] font-normal text-slate-400 mr-1">
+                  (×{buildQuantity.toLocaleString()})
+                </span>
+              ) : null}
+            </span>
+          </div>
+        ) : (
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <p className="text-[15px] font-bold tabular-nums text-slate-900 leading-none">
+              {fmtPrice(total)}
+            </p>
+            {unit && (
+              <span className="text-[9px] text-slate-500 tabular-nums">{unit}/יח׳</span>
+            )}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-1 mt-1">{chips}</div>
       </div>
+    );
+  }
+
+  return (
+    <div className="shrink-0 space-y-1">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-1.5">
+        <ScenarioCard
+          title="מחיר רשמי בלבד"
+          sub="Digi-Key / Mouser / TI"
+          total={off.total}
+          active={!activeModeEast}
+          accent="brand"
+          chips={
+            <>
+              <MiniChip label="מתומחר" value={off.priced_lines} tone="blue" />
+              <MiniChip label="אין פתרון" value={off.no_solution} tone={off.no_solution ? "red" : "neutral"} />
+              <MiniChip label="דורש אישור" value={off.needs_approval} tone="amber" />
+            </>
+          }
+        />
+        <ScenarioCard
+          title="משולב עם מזרח"
+          sub="Link / ספקי מזרח"
+          total={east.total}
+          active={activeModeEast}
+          accent="amber"
+          chips={
+            <>
+              <MiniChip label="מתומחר" value={east.priced_lines} tone="blue" />
+              <MiniChip label="מזרח" value={east.east_selected_lines} tone="amber" />
+              <MiniChip label="דורש אישור" value={east.needs_approval} tone="amber" />
+            </>
+          }
+        />
+        <div
+          className={clsx(
+            cardBase,
+            isSaving
+              ? "border-green-200 bg-green-50/50"
+              : isGap
+                ? "border-amber-200 bg-amber-50/30"
+                : "border-slate-200 bg-white",
+          )}
+        >
+          <p className="text-[10.5px] font-bold text-navy leading-tight">
+            {isSaving ? "חיסכון" : isGap ? "פער" : "השוואה"}
+          </p>
+          <div className="flex items-baseline gap-1.5 mt-1">
+            {isSaving ? (
+              <TrendingDown className="w-3.5 h-3.5 text-green-600 shrink-0" />
+            ) : isGap ? (
+              <TrendingUp className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            ) : null}
+            <p
+              className={clsx(
+                "text-[15px] font-bold tabular-nums leading-none",
+                isSaving ? "text-green-700" : isGap ? "text-amber-700" : "text-slate-700",
+              )}
+            >
+              {fmtPrice(Math.abs(savings.amount))}
+            </p>
+            {savings.percent != null && savings.amount !== 0 && (
+              <span
+                className={clsx(
+                  "text-[10px] font-semibold tabular-nums",
+                  isSaving ? "text-green-700" : "text-amber-700",
+                )}
+              >
+                {isSaving ? "−" : "+"}
+                {Math.abs(savings.percent).toFixed(1)}%
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1 mt-1">
+            <MiniChip label="מזרח" value={east.east_selected_lines} tone="amber" />
+            <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] text-amber-800">
+              <Lock className="w-2.5 h-2.5" /> פנימי
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {summary && (
+        <p
+          className={clsx(
+            "flex items-center gap-1 text-[9px] leading-snug px-0.5",
+            hasGap ? "text-amber-800" : "text-slate-500",
+          )}
+        >
+          {hasGap && <AlertTriangle className="h-3 w-3 shrink-0" />}
+          <span>
+            סכום פעיל ({activeUnit ?? "—"}/יח׳): רק שורות עם מחיר — לא כולל
+            {excludedNoSolution > 0 ? ` ${excludedNoSolution} ללא מחיר` : ""}
+            {excludedDnp > 0 ? ` · ${excludedDnp} DNP` : ""}.
+            {summary.has_solution > 0
+              ? ` ${summary.has_solution}/${summary.total_lines} שורות בסכום.`
+              : ""}
+          </span>
+        </p>
+      )}
     </div>
   );
 }

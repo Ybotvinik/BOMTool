@@ -57,6 +57,7 @@ def _compute_metrics(
         "bom_error_count": 0,
         "bom_warning_count": 0,
         "official_selected_total": None,
+        "official_selected_unit_cost": None,
         "official_has_solution": 0,
         "official_needs_approval": 0,
         "official_no_solution": 0,
@@ -64,6 +65,7 @@ def _compute_metrics(
         "official_snapshot_id": None,
         "official_snapshot_name": None,
         "official_snapshot_total": None,
+        "official_snapshot_unit_cost": None,
         "official_snapshot_created_at": None,
         "latest_customer_export_at": None,
         "latest_procurement_export_at": None,
@@ -161,6 +163,12 @@ def _compute_metrics(
         except Exception:  # noqa: BLE001
             pass
 
+        bq = int(out.get("effective_build_quantity") or 0)
+        if out.get("official_selected_total") is not None and bq > 0:
+            out["official_selected_unit_cost"] = float(out["official_selected_total"]) / bq
+        else:
+            out["official_selected_unit_cost"] = None
+
         official_snap = db.scalar(
             select(OfficialPriceSnapshot)
             .where(
@@ -185,6 +193,11 @@ def _compute_metrics(
             out["official_snapshot_total"] = float(
                 sum(float(l.official_extended_price or 0) for l in snap_lines)
             )
+            bq_snap = int(out.get("effective_build_quantity") or 0)
+            if bq_snap > 0:
+                out["official_snapshot_unit_cost"] = float(out["official_snapshot_total"]) / bq_snap
+            else:
+                out["official_snapshot_unit_cost"] = None
 
     quote = db.scalar(
         select(SupplierQuote)

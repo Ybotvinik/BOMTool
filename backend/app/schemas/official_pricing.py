@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.bom_import import CandidateHeaderRow
 from app.schemas.common import ORMModel
 
 
@@ -227,6 +228,39 @@ class EastQuoteUploadResult(BaseModel):
     dnp_count: int = 0
     match_summary: dict
     is_active: bool = True
+
+
+class ExcelSheetsDetect(BaseModel):
+    sheet_names: list[str]
+    active_sheet: str
+
+
+class EastQuotePreview(BaseModel):
+    file_path: str
+    file_name: str
+    sheet_name: str
+    sheet_names: list[str]
+    detected_header_row_index: int | None
+    header_row_index: int | None
+    columns: list[str]
+    rows: list[list[str]]
+    total_rows: int
+    candidate_header_rows: list[CandidateHeaderRow]
+    suggested_mapping: dict[str, str | None]
+    warning: str | None = None
+
+
+class EastQuoteImportRequest(BaseModel):
+    project_id: int
+    bom_version_id: int
+    file_path: str
+    sheet_name: str | None = None
+    header_row_index: int | None = None
+    column_mapping: dict[str, str | None] | None = None
+    supplier_name: str | None = None
+    replace_existing: bool = False
+    quote_id_to_replace: int | None = None
+    enable_integrated_pricing: bool = True
 
 
 class IncludeEastPricingRequest(BaseModel):

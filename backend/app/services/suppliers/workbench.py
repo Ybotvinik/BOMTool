@@ -155,10 +155,11 @@ def _is_exact_result(row: OfficialSupplierPriceResult | None) -> bool:
 
 
 def _is_exact_east_offer(offer: dict) -> bool:
-    return (
-        offer.get("unit_price") is not None
-        and offer.get("is_exact_match")
-        and offer.get("match_status") in ("exact_mpn", "matched")
+    if offer.get("unit_price") is None:
+        return False
+    return bool(
+        offer.get("is_exact_match")
+        or offer.get("match_status") in ("exact_mpn", "matched", "designator_match")
     )
 
 
@@ -508,6 +509,27 @@ def resolve_line_selection(
     )
 
 
+def _placeholder_api_offer(supplier: str) -> dict:
+    return {
+        "supplier": supplier,
+        "supplier_display": SUPPLIER_DISPLAY_NAMES.get(supplier, supplier),
+        "supplier_part_number": None,
+        "manufacturer": None,
+        "unit_price": None,
+        "extended_price": None,
+        "stock": None,
+        "price_break_qty": None,
+        "match_status": "not_fetched",
+        "match_reason": "מחיר לא נמשך — ניתן למשוך ידנית מהמגירה",
+        "is_exact_match": False,
+        "product_url": None,
+        "lead_time": None,
+        "currency": "USD",
+        "needs_review": False,
+        "internal_only": False,
+    }
+
+
 def _offer_from_result(
     row: OfficialSupplierPriceResult | None, *, req_qty: float
 ) -> dict | None:
@@ -782,6 +804,10 @@ def get_workbench_results(
             offer = _offer_from_result(_result_for_supplier(results_map, bl.id, s), req_qty=req_f)
             if offer:
                 offers_raw.append(offer)
+        seen_api = {o["supplier"] for o in offers_raw if not o.get("internal_only")}
+        for s in priority:
+            if s not in seen_api:
+                offers_raw.append(_placeholder_api_offer(s))
         for eo in line_east:
             offers_raw.append(eo)
 

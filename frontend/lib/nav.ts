@@ -23,7 +23,7 @@ export const NAV_ACTIVE_ALIASES: Record<string, string[]> = {
 
 // Sidebar order matches the product spec (Hebrew labels, RTL).
 export const NAV_ITEMS: NavItem[] = [
-  { label: "פרויקטים", href: "/projects", icon: FolderKanban },
+  { label: "לקוחות ופרויקטים", href: "/projects", icon: FolderKanban },
   { label: "סקירת פרויקט", href: "/project", icon: LayoutDashboard },
   { label: "טבלת BOM", href: "/bom", icon: Table2 },
   { label: "מחירון BOM מספקים", href: "/official-pricing", icon: DollarSign },

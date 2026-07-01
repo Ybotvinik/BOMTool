@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Upload, RefreshCw } from "lucide-react";
+import { Upload, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/ui";
 import { ProjectsWorkspace } from "@/components/projects/ProjectsWorkspace";
-import { API_URL, apiGet, apiPost } from "@/lib/api";
-import { useCurrentUser } from "@/lib/current-user";
+import { API_URL, apiGet } from "@/lib/api";
 
 export default function ProjectsPage() {
-  const { user } = useCurrentUser();
   const [live, setLive] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   async function load() {
@@ -27,35 +24,11 @@ export default function ProjectsPage() {
     void load();
   }, [reloadToken]);
 
-  async function createProject() {
-    setCreating(true);
-    try {
-      const customers = await apiGet<{ id: number }[]>("/api/customers");
-      const stamp = Date.now().toString().slice(-5);
-      const customerId = customers[0]?.id ?? 1;
-      await apiPost(
-        "/api/projects",
-        {
-          customer_id: customerId,
-          name: `פרויקט חדש ${stamp}`,
-          code: `NEW-${stamp}`,
-          status: "NEW",
-        },
-        user.id,
-      );
-      setReloadToken((x) => x + 1);
-    } catch (e) {
-      alert("יצירת פרויקט נכשלה — ודא שה-API פעיל. " + String(e));
-    } finally {
-      setCreating(false);
-    }
-  }
-
   return (
     <>
       <PageHeader
-        title="פרויקטים"
-        subtitle="עץ לקוחות → פרויקטים → כרטיסים → מנות הרכבה"
+        title="לקוחות ופרויקטים"
+        subtitle="ניהול לקוחות → פרויקטים → כרטיסים → מנות הרכבה"
         actions={
           <>
             <span
@@ -81,13 +54,6 @@ export default function ProjectsPage() {
             >
               <Upload className="h-3.5 w-3.5" /> טעינת BOM
             </Link>
-            <button
-              onClick={createProject}
-              disabled={creating}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-brand text-brand-fg text-[12px] font-medium hover:bg-brand/90 disabled:opacity-60"
-            >
-              <Plus className="h-3.5 w-3.5" /> {creating ? "יוצר..." : "פרויקט חדש"}
-            </button>
           </>
         }
       />

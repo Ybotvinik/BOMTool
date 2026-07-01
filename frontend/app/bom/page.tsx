@@ -7,6 +7,7 @@ import { RefreshCw, Upload, Loader2, AlertTriangle, Inbox, Search } from "lucide
 import { Card, PageHeader } from "@/components/ui";
 import { PageTabs } from "@/components/PageTabs";
 import { BomContextHeader } from "@/components/bom/BomContextHeader";
+import { CardBatchScopeBar } from "@/components/project/CardBatchScopeBar";
 import { BomQualityPanel } from "@/components/bom/BomQualityPanel";
 import { BomIssuesPanel } from "@/components/bom/BomIssuesPanel";
 import { BomLinesTable } from "@/components/bom/BomLinesTable";
@@ -18,7 +19,10 @@ import {
   type BomSummary,
   type BomVersionMeta,
 } from "@/components/bom/types";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPatch } from "@/lib/api";
+import { useProjectBatchScope } from "@/lib/use-project-batch-scope";
+import { formatBatchLabel } from "@/lib/project-overview";
+import { useCurrentUser } from "@/lib/current-user";
 import { EditBomLineModal, type QualityLine } from "@/components/EditBomLineModal";
 import { ReviewBomLineModal } from "@/components/bom/ReviewBomLineModal";
 
@@ -33,23 +37,17 @@ const BOM_TABS = [
 
 type BomTab = (typeof BOM_TABS)[number]["id"];
 
-function versionSelectLabel(v: BomVersionMeta): string {
-  const name = v.version_name ?? v.version_label;
-  const rev = v.revision_code ? ` · ${v.revision_code}` : "";
-  const active = v.is_active ? " ★" : "";
-  return `${name}${rev}${active}`;
-}
-
 function BomInner() {
   const router = useRouter();
+  const { user } = useCurrentUser();
   const params = useSearchParams();
   const urlProjectId = params.get("project_id");
+  const urlCardId = params.get("card_id");
   const urlVersionId = params.get("version_id");
   const activeTab = (params.get("tab") as BomTab) || "lines";
   const urlFilter = params.get("filter") as BomFilterKey | null;
 
   const [pickerProjects, setPickerProjects] = useState<BomProjectMeta[]>([]);
-  const [versions, setVersions] = useState<BomVersionMeta[]>([]);
   const [versionId, setVersionId] = useState<number | null>(urlVersionId ? Number(urlVersionId) : null);
   const [version, setVersion] = useState<BomVersionMeta | null>(null);
   const [project, setProject] = useState<BomProjectMeta | null>(null);
@@ -62,6 +60,7 @@ function BomInner() {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<QualityLine | null>(null);
   const [reviewing, setReviewing] = useState<QualityLine | null>(null);
+  const [qtySaving, setQtySaving] = useState(false);
 
   useEffect(() => {
     if (urlFilter && BOM_FILTERS.some(([k]) => k === urlFilter)) {
@@ -116,16 +115,8 @@ function BomInner() {
 
   useEffect(() => {
     (async () => {
-      setStatus("loading");
-      let vs: BomVersionMeta[] = [];
-      try {
-        vs = await apiGet<BomVersionMeta[]>("/api/bom-versions");
-        setVersions(vs);
-      } catch {
-        /* ignore */
-      }
-
       if (!urlProjectId && !urlVersionId) {
+        setStatus("loading");
         try {
           const [ps, cs] = await Promise.all([
             apiGet<BomProjectMeta[]>("/api/projects"),
@@ -140,54 +131,131 @@ function BomInner() {
         return;
       }
 
-      let id: number | null = urlVersionId ? Number(urlVersionId) : null;
-
-      if (id == null && urlProjectId) {
-        const pid = Number(urlProjectId);
-        if (!Number.isFinite(pid)) {
-          setStatus("pick-project");
-          return;
-        }
+      if (urlProjectId && !urlVersionId) {
         try {
-          const p = await apiGet<BomProjectMeta>(`/api/projects/${pid}`);
+          const p = await apiGet<BomProjectMeta>(`/api/projects/${Number(urlProjectId)}`);
           setProject(p);
           const cs = await apiGet<ApiCustomer[]>("/api/customers");
           setCustomers(cs);
-          if (p.active_version_id == null) {
-            setStatus("no-bom");
-            return;
-          }
-          id = p.active_version_id;
         } catch (e) {
           setStatus("error");
           setErrorMsg(String(e));
-          return;
         }
-      }
-
-      if (id == null) {
-        setStatus("pick-project");
         return;
       }
 
-      setVersionId(id);
-      loadMeta(id);
-      loadLines(id);
+      if (urlVersionId && !urlProjectId) {
+        try {
+          const v = await apiGet<BomVersionMeta>(`/api/bom-versions/${Number(urlVersionId)}`);
+          const [p, cs] = await Promise.all([
+            apiGet<BomProjectMeta>(`/api/projects/${v.project_id}`),
+            apiGet<ApiCustomer[]>("/api/customers"),
+          ]);
+          setProject(p);
+          setCustomers(cs);
+        } catch (e) {
+          setStatus("error");
+          setErrorMsg(String(e));
+        }
+      }
     })();
-  }, [urlProjectId, urlVersionId, loadLines, loadMeta]);
+  }, [urlProjectId, urlVersionId]);
 
-  function selectVersion(id: number) {
-    setVersionId(id);
-    setFilter("all");
-    loadMeta(id);
-    loadLines(id);
+  const scopedProjectId =
+    project?.id ??
+    (urlProjectId && Number.isFinite(Number(urlProjectId)) ? Number(urlProjectId) : null) ??
+    version?.project_id ??
+    null;
+
+  const scope = useProjectBatchScope(scopedProjectId, urlCardId, urlVersionId);
+
+  useEffect(() => {
+    if (status === "pick-project") return;
+    if (scope.loading) {
+      setStatus("loading");
+      return;
+    }
+    if (!scopedProjectId) return;
+
+    if (scope.versionId == null) {
+      setVersionId(null);
+      setVersion(null);
+      setLines([]);
+      setSummary(null);
+      setStatus(scope.overview ? "no-bom" : "error");
+      if (scope.error) setErrorMsg(scope.error);
+      return;
+    }
+
+    // Fill defaults only when card/version missing — do not override explicit user selection.
+    if (
+      (!urlCardId || !urlVersionId) &&
+      scope.cardId != null &&
+      scope.versionId != null
+    ) {
+      const q = new URLSearchParams(params.toString());
+      q.set("project_id", String(scopedProjectId));
+      if (!urlCardId) q.set("card_id", String(scope.cardId));
+      if (!urlVersionId) q.set("version_id", String(scope.versionId));
+      router.replace(`/bom?${q.toString()}`);
+      return;
+    }
+
+    setVersionId(scope.versionId);
+    loadMeta(scope.versionId);
+    loadLines(scope.versionId);
+  }, [
+    scope.loading,
+    scope.versionId,
+    scope.cardId,
+    scope.overview,
+    scope.error,
+    scopedProjectId,
+    status,
+    urlCardId,
+    urlVersionId,
+    params,
+    router,
+    loadLines,
+    loadMeta,
+  ]);
+
+  function pushScope(next: { cardId: number; versionId: number | null }) {
+    if (!scopedProjectId) return;
     const q = new URLSearchParams(params.toString());
-    q.set("version_id", String(id));
-    if (project?.id) q.set("project_id", String(project.id));
+    q.set("project_id", String(scopedProjectId));
+    q.set("card_id", String(next.cardId));
+    if (next.versionId != null) q.set("version_id", String(next.versionId));
+    else q.delete("version_id");
     if (activeTab !== "lines") q.set("tab", activeTab);
     else q.delete("tab");
     q.delete("filter");
     router.replace(`/bom?${q.toString()}`);
+  }
+
+  function selectCard(cardId: number) {
+    setFilter("all");
+    pushScope({ cardId, versionId: scope.defaultBatchForCard(cardId) });
+  }
+
+  function selectBatch(batchId: number) {
+    setFilter("all");
+    const card = scope.overview?.cards.find((c) => c.batches.some((b) => b.id === batchId));
+    if (!card) return;
+    pushScope({ cardId: card.id, versionId: batchId });
+  }
+
+  async function saveBatchQuantity(qty: number) {
+    if (versionId == null) return;
+    setQtySaving(true);
+    try {
+      await apiPatch(`/api/bom-versions/${versionId}`, { build_quantity: qty }, user.id);
+      await scope.reload();
+      await loadMeta(versionId);
+      await loadLines(versionId);
+    } finally {
+      setQtySaving(false);
+    }
   }
 
   function navigateToFilter(next: BomFilterKey) {
@@ -199,15 +267,15 @@ function BomInner() {
     router.push(`/bom?${q.toString()}`);
   }
 
-  const customerName = project ? customers.find((c) => c.id === project.customer_id)?.name : null;
-  const scopedProjectId =
-    project?.id ??
-    (urlProjectId && Number.isFinite(Number(urlProjectId)) ? Number(urlProjectId) : null) ??
-    version?.project_id ??
-    null;
-  const projectVersions = scopedProjectId
-    ? versions.filter((v) => v.project_id === scopedProjectId)
-    : versions;
+  const customerName = scope.overview?.customer_name ?? (project ? customers.find((c) => c.id === project.customer_id)?.name : null);
+
+  const tabQuery = {
+    project_id: scopedProjectId,
+    card_id: scope.cardId,
+    version_id: scope.versionId ?? versionId,
+  };
+
+  const showContext = Boolean(scopedProjectId && scope.overview) && status !== "pick-project";
 
   const rows = lines;
   const q = query.trim().toLowerCase();
@@ -222,13 +290,6 @@ function BomInner() {
     return true;
   });
 
-  const tabQuery = {
-    project_id: scopedProjectId,
-    version_id: versionId,
-  };
-
-  const showContext = Boolean(project || version) && status !== "pick-project" && status !== "no-bom";
-
   return (
     <>
       <PageHeader
@@ -236,23 +297,6 @@ function BomInner() {
         subtitle="נתוני BOM, ניתוח איכות וחריגים"
         actions={
           <>
-            {projectVersions.length > 0 && (
-              <select
-                value={versionId ?? ""}
-                onChange={(e) => selectVersion(Number(e.target.value))}
-                className="h-8 min-w-[160px] rounded-md border border-slate-200 px-2 text-[12px] bg-white font-medium"
-                title="גרסת BOM נבחרת"
-              >
-                <option value="" disabled>
-                  בחר גרסה
-                </option>
-                {projectVersions.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {versionSelectLabel(v)} (#{v.id})
-                  </option>
-                ))}
-              </select>
-            )}
             <button
               type="button"
               onClick={() => versionId != null && loadLines(versionId)}
@@ -262,7 +306,13 @@ function BomInner() {
               <RefreshCw className="h-3.5 w-3.5" /> רענון
             </button>
             <Link
-              href={project ? `/upload-bom?project_id=${project.id}` : "/upload-bom"}
+              href={
+                scopedProjectId && scope.cardId && scope.versionId
+                  ? `/upload-bom?project_id=${scopedProjectId}&card_id=${scope.cardId}&version_id=${scope.versionId}`
+                  : scopedProjectId
+                    ? `/upload-bom?project_id=${scopedProjectId}`
+                    : "/upload-bom"
+              }
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-brand text-brand-fg text-[12px] font-medium hover:bg-brand/90"
             >
               <Upload className="h-3.5 w-3.5" /> טעינת BOM
@@ -274,12 +324,29 @@ function BomInner() {
       <PageTabs tabs={[...BOM_TABS]} activeTab={activeTab} basePath="/bom" query={tabQuery} />
 
       {showContext && (
+        <CardBatchScopeBar
+          overview={scope.overview}
+          cardId={scope.cardId}
+          versionId={scope.versionId}
+          loading={scope.loading}
+          onCardChange={selectCard}
+          onBatchChange={selectBatch}
+          buildQuantity={scope.selectedBatch?.build_quantity ?? version?.build_quantity ?? null}
+          cardDefaultQuantity={scope.selectedCard?.build_quantity ?? null}
+          onSaveBuildQuantity={saveBatchQuantity}
+          savingQty={qtySaving}
+        />
+      )}
+
+      {showContext && status !== "no-bom" && (
         <BomContextHeader
           project={project}
           customerName={customerName ?? null}
+          cardName={scope.selectedCard?.name ?? null}
+          batchLabel={scope.selectedBatch ? formatBatchLabel(scope.selectedBatch) : null}
           version={version}
           summary={summary}
-          loading={status === "loading"}
+          loading={status === "loading" || scope.loading}
         />
       )}
 

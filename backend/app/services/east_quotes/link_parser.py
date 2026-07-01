@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from app.services.bom_parser import clean_display, list_sheets_and_rows
+from app.services.bom_parser import clean_display, detect_header_row, list_sheets_and_rows
 from app.services.suppliers.base import parse_money
 
 FOOTER_LABELS = frozenset({"total price", "unit price", "subtotal", "grand total"})
@@ -133,34 +133,42 @@ def _parse_qty(text: str) -> float | None:
         return None
 
 
-def parse_link_xlsx(content: bytes, filename: str, sheet_name: str | None = None) -> ParsedEastQuote:
-    """Parse a Link-format East supplier quote workbook."""
-    sheet_names, active_sheet, rows = list_sheets_and_rows(content, filename, sheet_name)
-    header_idx = _find_header_row(rows)
-    if header_idx is None:
-        raise ValueError("לא נמצאה שורת כותרות (Quantity / Designator / MPN / Unit Price USD)")
+def _indices_from_mapping(header: list[str], column_mapping: dict[str, str | None]) -> dict[str, int | None]:
+    col_index = {h: i for i, h in enumerate(header) if h}
+    out: dict[str, int | None] = {}
+    for field, column in column_mapping.items():
+        if column and column in col_index:
+            out[field] = col_index[column]
+        else:
+            out[field] = None
+    return out
 
+
+def _parse_rows_to_quote(
+    *,
+    rows: list[list[str]],
+    header_idx: int,
+    active_sheet: str,
+    idx: dict[str, int | None],
+) -> ParsedEastQuote:
     meta = _extract_metadata(rows, header_idx)
-    header = [clean_display(c) for c in rows[header_idx]]
-    cols = _column_map(header)
-
-    idx_qty = _col_idx(cols, "quantity", "qty")
-    idx_des = _col_idx(cols, "designator", "refdes")
-    idx_mpn = _col_idx(cols, "manufacturer part number 1", "manufacturer part number", "mpn")
-    idx_desc = _col_idx(cols, "description")
-    idx_fp = _col_idx(cols, "footprint", "package")
-    idx_val = _col_idx(cols, "value")
-    idx_mfr = _col_idx(cols, "manufacturer 1", "manufacturer")
-    idx_spn = _col_idx(cols, "supplier part number 1", "supplier part number")
-    idx_asm = _col_idx(cols, "assembly")
-    idx_vendor = _col_idx(cols, "vendor", "supplier", "supplier name", "vendor name", "ספק")
-    idx_qqty = cols.get("qty") or cols.get("quoted qty")
-    idx_unit = _col_idx(cols, "unit price usd", "unit price")
-    idx_total = _col_idx(cols, "total in usd", "total price", "total")
-    idx_lt = _col_idx(cols, "l/t", "lead time", "lt")
-    idx_brand = _col_idx(cols, "brand")
-    idx_code = _col_idx(cols, "code")
-    idx_comments = _col_idx(cols, "comments", "comment")
+    idx_qty = idx.get("quantity")
+    idx_des = idx.get("designator")
+    idx_mpn = idx.get("mpn")
+    idx_desc = idx.get("description")
+    idx_fp = idx.get("footprint")
+    idx_val = idx.get("value")
+    idx_mfr = idx.get("manufacturer")
+    idx_spn = idx.get("supplier_part_number")
+    idx_asm = idx.get("assembly")
+    idx_vendor = idx.get("vendor")
+    idx_qqty = idx.get("quoted_qty")
+    idx_unit = idx.get("unit_price")
+    idx_total = idx.get("total_price")
+    idx_lt = idx.get("lead_time")
+    idx_brand = idx.get("brand")
+    idx_code = idx.get("supplier_code")
+    idx_comments = idx.get("comments")
 
     parsed = ParsedEastQuote(
         sheet_name=active_sheet,
@@ -214,3 +222,66 @@ def parse_link_xlsx(content: bytes, filename: str, sheet_name: str | None = None
         )
 
     return parsed
+
+
+def parse_east_with_mapping(
+    content: bytes,
+    filename: str,
+    *,
+    sheet_name: str | None = None,
+    header_row_index: int | None = None,
+    column_mapping: dict[str, str | None],
+) -> ParsedEastQuote:
+    if not column_mapping.get("mpn"):
+        raise ValueError("חובה למפות עמודת MPN")
+    if not column_mapping.get("unit_price"):
+        raise ValueError("חובה למפות עמודת מחיר יחידה (Unit Price)")
+
+    sheet_names, active_sheet, rows = list_sheets_and_rows(content, filename, sheet_name)
+    header_idx = header_row_index
+    if header_idx is None:
+        header_idx, _ = detect_header_row(rows)
+    if header_idx is None or header_idx >= len(rows):
+        raise ValueError("לא זוהתה שורת כותרות — יש לבחור ידנית")
+
+    header = [clean_display(c) for c in rows[header_idx]]
+    idx = _indices_from_mapping(header, column_mapping)
+    return _parse_rows_to_quote(rows=rows, header_idx=header_idx, active_sheet=active_sheet, idx=idx)
+
+
+def parse_link_xlsx(content: bytes, filename: str, sheet_name: str | None = None) -> ParsedEastQuote:
+    """Parse a Link-format East supplier quote workbook."""
+    sheet_names, active_sheet, rows = list_sheets_and_rows(content, filename, sheet_name)
+    header_idx = _find_header_row(rows)
+    if header_idx is None:
+        raise ValueError("לא נמצאה שורת כותרות (Quantity / Designator / MPN / Unit Price USD)")
+
+    header = [clean_display(c) for c in rows[header_idx]]
+    cols = _column_map(header)
+
+    idx = {
+        "quantity": _col_idx(cols, "quantity", "qty"),
+        "designator": _col_idx(cols, "designator", "refdes"),
+        "mpn": _col_idx(cols, "manufacturer part number 1", "manufacturer part number", "mpn"),
+        "description": _col_idx(cols, "description"),
+        "footprint": _col_idx(cols, "footprint", "package"),
+        "value": _col_idx(cols, "value"),
+        "manufacturer": _col_idx(cols, "manufacturer 1", "manufacturer"),
+        "supplier_part_number": _col_idx(cols, "supplier part number 1", "supplier part number"),
+        "assembly": _col_idx(cols, "assembly"),
+        "vendor": _col_idx(cols, "vendor", "supplier", "supplier name", "vendor name", "ספק"),
+        "quoted_qty": cols.get("qty") or cols.get("quoted qty"),
+        "unit_price": _col_idx(cols, "unit price usd", "unit price"),
+        "total_price": _col_idx(cols, "total in usd", "total price", "total"),
+        "lead_time": _col_idx(cols, "l/t", "lead time", "lt"),
+        "brand": _col_idx(cols, "brand"),
+        "supplier_code": _col_idx(cols, "code"),
+        "comments": _col_idx(cols, "comments", "comment"),
+    }
+
+    return _parse_rows_to_quote(
+        rows=rows,
+        header_idx=header_idx,
+        active_sheet=active_sheet,
+        idx=idx,
+    )

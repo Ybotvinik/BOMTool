@@ -120,6 +120,19 @@ def _stringify(value: object) -> str:
     return str(value).strip()
 
 
+def list_sheet_names(content: bytes, filename: str) -> tuple[list[str], str]:
+    """Return (sheet_names, active_sheet_name) without loading row data."""
+    name = (filename or "").lower()
+    if name.endswith(".csv"):
+        return ["CSV"], "CSV"
+
+    wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    sheet_names = list(wb.sheetnames)
+    active = wb.active.title if wb.active else (sheet_names[0] if sheet_names else "")
+    wb.close()
+    return sheet_names, active
+
+
 def list_sheets_and_rows(
     content: bytes, filename: str, sheet_name: str | None = None
 ) -> tuple[list[str], str, list[list[str]]]:

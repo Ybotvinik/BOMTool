@@ -29,12 +29,16 @@ function versionLabel(v: BomVersionMeta): string {
 export function BomContextHeader({
   project,
   customerName,
+  cardName,
+  batchLabel,
   version,
   summary,
   loading,
 }: {
   project: BomProjectMeta | null;
   customerName: string | null;
+  cardName?: string | null;
+  batchLabel?: string | null;
   version: BomVersionMeta | null;
   summary: BomSummary | null;
   loading?: boolean;
@@ -55,9 +59,11 @@ export function BomContextHeader({
         {loading && <span className="text-[11px] text-slate-400">טוען הקשר…</span>}
       </div>
 
-      <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-x-4 gap-y-1.5 text-[12px]">
+      <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-10 gap-x-4 gap-y-1.5 text-[12px]">
         <MetaItem label="פרויקט" value={project?.name ?? "לא זמין"} />
         <MetaItem label="לקוח" value={customerName ?? "לא זמין"} />
+        <MetaItem label="כרטיס" value={cardName ?? "לא זמין"} />
+        <MetaItem label="מנה" value={batchLabel ?? (version ? versionLabel(version) : "לא זמין")} />
         <MetaItem label="BOM Version" value={version ? versionLabel(version) : "לא זמין"} />
         <MetaItem
           label="BOM פעיל"

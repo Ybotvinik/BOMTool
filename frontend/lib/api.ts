@@ -128,11 +128,54 @@ export async function apiChinaPreview<T>(opts: {
   return res.json() as Promise<T>;
 }
 
+export async function apiEastQuotePreview<T>(opts: {
+  file?: File;
+  filePath?: string;
+  sheetName?: string;
+  headerRowIndex?: number;
+}): Promise<T> {
+  const path = "/api/official-pricing/east-quotes/preview";
+  const form = new FormData();
+  if (opts.file) form.append("file", opts.file);
+  if (opts.filePath) form.append("file_path", opts.filePath);
+  if (opts.sheetName) form.append("sheet_name", opts.sheetName);
+  if (opts.headerRowIndex != null) form.append("header_row_index", String(opts.headerRowIndex));
+  const res = await fetch(`${API_URL}${path}`, { method: "POST", body: form });
+  if (!res.ok) await parseError(res, path, "POST");
+  return res.json() as Promise<T>;
+}
+
+export async function apiEastQuoteImport<T>(
+  body: {
+    project_id: number;
+    bom_version_id: number;
+    file_path: string;
+    sheet_name?: string | null;
+    header_row_index?: number | null;
+    column_mapping?: Record<string, string | null> | null;
+    supplier_name?: string | null;
+    replace_existing?: boolean;
+    quote_id_to_replace?: number | null;
+    enable_integrated_pricing?: boolean;
+  },
+  userId?: number,
+): Promise<T> {
+  return apiPost("/api/official-pricing/east-quotes/import", body, userId);
+}
+
+export async function apiEastQuoteDetectSheets(file: File): Promise<{
+  sheet_names: string[];
+  active_sheet: string;
+}> {
+  return apiUpload("/api/official-pricing/east-quotes/detect-sheets", file);
+}
+
 export async function apiEastQuoteUpload<T>(opts: {
   file: File;
   projectId: number;
   bomVersionId: number;
   supplierName?: string;
+  sheetName?: string;
   replaceExisting?: boolean;
   quoteIdToReplace?: number;
   userId?: number;
@@ -144,6 +187,9 @@ export async function apiEastQuoteUpload<T>(opts: {
   form.append("bom_version_id", String(opts.bomVersionId));
   if (opts.supplierName?.trim()) {
     form.append("supplier_name", opts.supplierName.trim());
+  }
+  if (opts.sheetName?.trim()) {
+    form.append("sheet_name", opts.sheetName.trim());
   }
   form.append("replace_existing", String(opts.replaceExisting ?? false));
   if (opts.quoteIdToReplace != null) {
