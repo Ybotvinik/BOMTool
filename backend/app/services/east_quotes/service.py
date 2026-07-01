@@ -459,6 +459,7 @@ def east_offers_by_bom_line(
             "matched_mpn": _east_mpn_for_display(ql),
             "supplier_part_number": _east_supplier_pn_for_display(ql),
             "manufacturer": ql.manufacturer or ql.brand,
+            "description": ql.description,
             "unit_price": float(ql.unit_price) if ql.unit_price is not None else None,
             "extended_price": float(ql.total_price) if ql.total_price is not None else None,
             "stock": float(ql.quoted_qty or ql.available_qty or 0) or None,

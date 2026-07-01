@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -81,11 +84,23 @@ def _load_bom_version(
     return project, version, lines
 
 
+def _content_disposition(file_name: str) -> str:
+    """Build a latin-1-safe Content-Disposition header with UTF-8 filename fallback."""
+    ascii_name = re.sub(r"[^\x20-\x7E]+", "_", file_name).strip("._") or "export.xlsx"
+    ascii_name = ascii_name.replace('"', "'")
+    if ascii_name == file_name:
+        return f'attachment; filename="{ascii_name}"'
+    return (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(file_name, safe='')}"
+    )
+
+
 def _xlsx_response(content: bytes, file_name: str) -> Response:
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{file_name}"'},
+        headers={"Content-Disposition": _content_disposition(file_name)},
     )
 
 

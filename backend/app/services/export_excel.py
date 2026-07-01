@@ -188,7 +188,19 @@ _FORBIDDEN_OFFICIAL_SOURCE_VALUES = frozenset(
 def _safe_part(value: str | None) -> str:
     if not value:
         return "unknown"
-    return re.sub(r"[^\w\-]+", "_", str(value).strip()).strip("_") or "unknown"
+    slug = re.sub(r"[^\w\-]+", "_", str(value).strip(), flags=re.ASCII)
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug or "unknown"
+
+
+_INVALID_EXCEL_SHEET_CHARS = re.compile(r"[\\/*?:\[\]]")
+
+
+def _sanitize_excel_sheet_title(title: str) -> str:
+    cleaned = _INVALID_EXCEL_SHEET_CHARS.sub(" ", title).strip()
+    if not cleaned:
+        cleaned = "Sheet"
+    return cleaned[:31]
 
 
 def _num(value: Decimal | float | int | None) -> float | None:
@@ -503,13 +515,13 @@ def _create_internal_workbook(sheet_title: str) -> tuple[Workbook, object, objec
     tpl_wb = _load_internal_template_workbook()
     tpl_ws = tpl_wb.active
     ws = tpl_ws
-    ws.title = sheet_title
+    ws.title = _sanitize_excel_sheet_title(sheet_title)
     return tpl_wb, ws, tpl_ws
 
 
 def _add_internal_sheet(wb: Workbook, sheet_title: str, tpl_ws) -> object:
     ws = wb.copy_worksheet(wb.worksheets[0])
-    ws.title = sheet_title
+    ws.title = _sanitize_excel_sheet_title(sheet_title)
     return ws
 
 
@@ -1508,7 +1520,7 @@ def build_supplier_purchase_report_xlsx(
         "digikey": "Digi-Key",
         "mouser": "Mouser",
         "ti": "TI",
-        "china": "סין / מזרח",
+        "china": "סין מזרח",
         "manual": "Manual",
         "tbd": "TBD",
     }

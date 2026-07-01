@@ -126,6 +126,7 @@ function ProcurementFileInner() {
 
   const lastLoadedVersionRef = useRef<number | null>(null);
   const lastFilterKeyRef = useRef<string>("");
+  const loadSeqRef = useRef(0);
 
   const needsProjectPick = !urlProjectId && !urlVersionId;
 
@@ -166,6 +167,7 @@ function ProcurementFileInner() {
   const loadPurchaseFile = useCallback(
     async (bomVersionId: number, opts?: { silent?: boolean }) => {
       if (scopedProjectId == null) return;
+      const seq = ++loadSeqRef.current;
       if (!opts?.silent) setLoading(true);
       setError(null);
       try {
@@ -173,20 +175,21 @@ function ProcurementFileInner() {
           project_id: String(scopedProjectId),
           bom_version_id: String(bomVersionId),
           supplier: supplierFilter,
-          include_east: String(includeEast),
         });
         if (snapshotId != null) qs.set("snapshot_id", String(snapshotId));
         const res = await apiGet<PurchaseFileResponse>(`/api/purchase-file?${qs}`);
+        if (seq !== loadSeqRef.current) return;
         setData(res);
         setIncludeEast(res.include_east);
       } catch (e) {
+        if (seq !== loadSeqRef.current) return;
         setData(null);
         setError(String(e).replace(/^Error:\s*/, ""));
       } finally {
-        if (!opts?.silent) setLoading(false);
+        if (seq === loadSeqRef.current && !opts?.silent) setLoading(false);
       }
     },
-    [scopedProjectId, supplierFilter, includeEast, snapshotId],
+    [scopedProjectId, supplierFilter, snapshotId],
   );
 
   useEffect(() => {
@@ -213,7 +216,7 @@ function ProcurementFileInner() {
       return;
     }
 
-    const filterKey = `${scope.versionId}:${supplierFilter}:${snapshotId ?? ""}:${includeEast}`;
+    const filterKey = `${scope.versionId}:${supplierFilter}:${snapshotId ?? ""}`;
     if (
       lastLoadedVersionRef.current === scope.versionId &&
       lastFilterKeyRef.current === filterKey
@@ -238,10 +241,10 @@ function ProcurementFileInner() {
     loadPurchaseFile,
     supplierFilter,
     snapshotId,
-    includeEast,
   ]);
 
   function selectProject(nextProjectId: number) {
+    loadSeqRef.current += 1;
     lastLoadedVersionRef.current = null;
     lastFilterKeyRef.current = "";
     setSnapshotId(null);
@@ -253,6 +256,7 @@ function ProcurementFileInner() {
 
   function pushScope(next: { cardId: number; versionId: number | null }) {
     if (!scopedProjectId) return;
+    loadSeqRef.current += 1;
     lastLoadedVersionRef.current = null;
     lastFilterKeyRef.current = "";
     setSnapshotId(null);
@@ -319,7 +323,7 @@ function ProcurementFileInner() {
           project_id: scopedProjectId,
           bom_version_id: vid,
           supplier: supplier ?? supplierFilter,
-          include_east: includeEast,
+          include_east: data?.include_east ?? includeEast,
         },
         user.id,
       );
@@ -502,16 +506,14 @@ function ProcurementFileInner() {
               includeEast={includeEast}
               versionId={activeVersionId}
               userId={user.id}
-              onChange={(v) => {
-                setIncludeEast(v);
-                lastFilterKeyRef.current = "";
-              }}
+              onChange={setIncludeEast}
               onSaved={() => {
+                lastFilterKeyRef.current = "";
                 const vid = scope.versionId ?? versionId;
                 if (vid != null) void loadPurchaseFile(vid, { silent: true });
               }}
               onError={setError}
-              disabled={loading || activeVersionId == null}
+              disabled={loading || refreshing || activeVersionId == null}
             />
             {!includeEast && (
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-[11px] text-amber-900">

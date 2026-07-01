@@ -217,8 +217,11 @@ export async function apiDownloadPost(
   });
   if (!res.ok) await parseError(res, path, "POST");
   const cd = res.headers.get("Content-Disposition") ?? "";
-  const match = /filename="([^"]+)"/.exec(cd);
-  const fileName = match?.[1] ?? "export.xlsx";
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  const asciiMatch = /filename="([^"]+)"/.exec(cd);
+  const fileName = utf8Match
+    ? decodeURIComponent(utf8Match[1])
+    : asciiMatch?.[1] ?? "export.xlsx";
   const blob = await res.blob();
   return { blob, fileName };
 }

@@ -35,6 +35,7 @@ from app.services.suppliers.base import (
     normalize_mpn,
 )
 from app.services.east_quotes.service import east_offers_by_bom_line, list_east_quotes
+from app.services.line_description import resolve_line_display_description
 from app.services.suppliers.digikey import DigiKeyClient
 from app.services.suppliers.mouser import MouserClient
 from app.services.suppliers.ti import TIClient
@@ -541,6 +542,7 @@ def _offer_from_result(
         "supplier_display": SUPPLIER_DISPLAY_NAMES.get(row.supplier, row.supplier),
         "supplier_part_number": row.supplier_part_number,
         "manufacturer": row.manufacturer,
+        "description": row.description,
         "unit_price": unit,
         "extended_price": unit * req_qty if unit is not None else None,
         "stock": float(row.available_qty) if row.available_qty is not None else None,
@@ -836,7 +838,13 @@ def get_workbench_results(
                 "search_mpn_override": override.search_mpn_override if override else None,
                 "search_mpn_override_active": bool(override and override.search_mpn_override),
                 "manufacturer": bl.manufacturer,
-                "description": bl.description,
+                "description": resolve_line_display_description(
+                    bl,
+                    line_id=bl.id,
+                    results_map=results_map,
+                    east_offers=line_east,
+                    priority=priority,
+                ),
                 "reference_designators": bl.reference_designators,
                 "required_qty": req_f,
                 "dnp": dnp,
