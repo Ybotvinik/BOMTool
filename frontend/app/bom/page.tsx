@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RefreshCw, Upload, Loader2, AlertTriangle, Inbox, Search } from "lucide-react";
@@ -61,15 +61,26 @@ function BomInner() {
   const [editing, setEditing] = useState<QualityLine | null>(null);
   const [reviewing, setReviewing] = useState<QualityLine | null>(null);
   const [qtySaving, setQtySaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const lastLoadedVersionRef = useRef<number | null>(null);
 
+  const needsProjectPick =
+    !urlProjectId && !urlVersionId;
   useEffect(() => {
     if (urlFilter && BOM_FILTERS.some(([k]) => k === urlFilter)) {
       setFilter(urlFilter);
     }
   }, [urlFilter]);
 
-  const loadLines = useCallback(async (id: number) => {
-    setStatus("loading");
+  useEffect(() => {
+    void Promise.all([
+      apiGet<BomProjectMeta[]>("/api/projects").then(setPickerProjects).catch(() => {}),
+      apiGet<ApiCustomer[]>("/api/customers").then(setCustomers).catch(() => {}),
+    ]);
+  }, []);
+
+  const loadLines = useCallback(async (id: number, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setStatus("loading");
     try {
       const [data, sum] = await Promise.all([
         apiGet<QualityLine[]>(`/api/bom-versions/${id}/quality-lines`),
@@ -78,6 +89,7 @@ function BomInner() {
       setLines(data);
       setSummary(sum);
       setStatus(data.length > 0 ? "ok" : "empty");
+      setErrorMsg("");
     } catch (e) {
       setStatus("error");
       setErrorMsg(String(e));
@@ -95,7 +107,7 @@ function BomInner() {
     applyLineSaved(updated, newSummary);
     setEditing(null);
     setReviewing(null);
-    if (versionId != null) loadLines(versionId);
+    if (versionId != null) loadLines(versionId, { silent: true });
   }
 
   const loadMeta = useCallback(async (id: number) => {
@@ -114,52 +126,29 @@ function BomInner() {
   }, []);
 
   useEffect(() => {
-    (async () => {
-      if (!urlProjectId && !urlVersionId) {
-        setStatus("loading");
-        try {
-          const [ps, cs] = await Promise.all([
-            apiGet<BomProjectMeta[]>("/api/projects"),
-            apiGet<ApiCustomer[]>("/api/customers"),
-          ]);
-          setPickerProjects(ps);
-          setCustomers(cs);
-        } catch {
-          /* ignore */
-        }
-        setStatus("pick-project");
-        return;
-      }
-
-      if (urlProjectId && !urlVersionId) {
-        try {
-          const p = await apiGet<BomProjectMeta>(`/api/projects/${Number(urlProjectId)}`);
-          setProject(p);
-          const cs = await apiGet<ApiCustomer[]>("/api/customers");
-          setCustomers(cs);
-        } catch (e) {
-          setStatus("error");
-          setErrorMsg(String(e));
-        }
-        return;
-      }
-
-      if (urlVersionId && !urlProjectId) {
+    if (needsProjectPick) return;
+    if (!urlProjectId && urlVersionId) {
+      void (async () => {
         try {
           const v = await apiGet<BomVersionMeta>(`/api/bom-versions/${Number(urlVersionId)}`);
-          const [p, cs] = await Promise.all([
-            apiGet<BomProjectMeta>(`/api/projects/${v.project_id}`),
-            apiGet<ApiCustomer[]>("/api/customers"),
-          ]);
+          const p = await apiGet<BomProjectMeta>(`/api/projects/${v.project_id}`);
           setProject(p);
-          setCustomers(cs);
         } catch (e) {
           setStatus("error");
           setErrorMsg(String(e));
         }
-      }
-    })();
-  }, [urlProjectId, urlVersionId]);
+      })();
+      return;
+    }
+    if (urlProjectId) {
+      void apiGet<BomProjectMeta>(`/api/projects/${Number(urlProjectId)}`)
+        .then(setProject)
+        .catch((e) => {
+          setStatus("error");
+          setErrorMsg(String(e));
+        });
+    }
+  }, [needsProjectPick, urlProjectId, urlVersionId]);
 
   const scopedProjectId =
     project?.id ??
@@ -170,14 +159,12 @@ function BomInner() {
   const scope = useProjectBatchScope(scopedProjectId, urlCardId, urlVersionId);
 
   useEffect(() => {
-    if (status === "pick-project") return;
-    if (scope.loading) {
-      setStatus("loading");
-      return;
-    }
+    if (needsProjectPick) return;
+    if (scope.loading) return;
     if (!scopedProjectId) return;
 
     if (scope.versionId == null) {
+      lastLoadedVersionRef.current = null;
       setVersionId(null);
       setVersion(null);
       setLines([]);
@@ -201,17 +188,20 @@ function BomInner() {
       return;
     }
 
+    if (lastLoadedVersionRef.current === scope.versionId) return;
+    lastLoadedVersionRef.current = scope.versionId;
+
     setVersionId(scope.versionId);
-    loadMeta(scope.versionId);
-    loadLines(scope.versionId);
+    void loadMeta(scope.versionId);
+    void loadLines(scope.versionId);
   }, [
+    needsProjectPick,
     scope.loading,
     scope.versionId,
     scope.cardId,
     scope.overview,
     scope.error,
     scopedProjectId,
-    status,
     urlCardId,
     urlVersionId,
     params,
@@ -220,7 +210,34 @@ function BomInner() {
     loadMeta,
   ]);
 
+  function selectProject(nextProjectId: number) {
+    setFilter("all");
+    lastLoadedVersionRef.current = null;
+    const q = new URLSearchParams(params.toString());
+    q.set("project_id", String(nextProjectId));
+    q.delete("card_id");
+    q.delete("version_id");
+    q.delete("filter");
+    if (activeTab !== "lines") q.set("tab", activeTab);
+    else q.delete("tab");
+    router.replace(`/bom?${q.toString()}`);
+  }
+
+  const refreshBom = useCallback(async () => {
+    const vid = scope.versionId ?? versionId;
+    if (vid == null) return;
+    setRefreshing(true);
+    try {
+      await scope.reload();
+      await loadMeta(vid);
+      await loadLines(vid, { silent: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [scope.reload, scope.versionId, versionId, loadMeta, loadLines]);
+
   function pushScope(next: { cardId: number; versionId: number | null }) {
+    lastLoadedVersionRef.current = null;
     if (!scopedProjectId) return;
     const q = new URLSearchParams(params.toString());
     q.set("project_id", String(scopedProjectId));
@@ -246,13 +263,14 @@ function BomInner() {
   }
 
   async function saveBatchQuantity(qty: number) {
-    if (versionId == null) return;
+    const vid = scope.versionId ?? versionId;
+    if (vid == null) return;
     setQtySaving(true);
     try {
-      await apiPatch(`/api/bom-versions/${versionId}`, { build_quantity: qty }, user.id);
+      await apiPatch(`/api/bom-versions/${vid}`, { build_quantity: qty }, user.id);
       await scope.reload();
-      await loadMeta(versionId);
-      await loadLines(versionId);
+      await loadMeta(vid);
+      await loadLines(vid, { silent: true });
     } finally {
       setQtySaving(false);
     }
@@ -275,7 +293,12 @@ function BomInner() {
     version_id: scope.versionId ?? versionId,
   };
 
-  const showContext = Boolean(scopedProjectId && scope.overview) && status !== "pick-project";
+  const showContext = Boolean(scopedProjectId && scope.overview) && !needsProjectPick;
+
+  const projectOptions = pickerProjects.map((p) => ({ id: p.id, name: p.name }));
+
+  const initialScopeLoading = !needsProjectPick && scope.loading && lines.length === 0;
+  const tableLoading = status === "loading" || initialScopeLoading || refreshing;
 
   const rows = lines;
   const q = query.trim().toLowerCase();
@@ -299,11 +322,16 @@ function BomInner() {
           <>
             <button
               type="button"
-              onClick={() => versionId != null && loadLines(versionId)}
-              disabled={versionId == null || status === "loading"}
+              onClick={() => void refreshBom()}
+              disabled={(scope.versionId ?? versionId) == null || tableLoading}
               className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50 disabled:opacity-50"
             >
-              <RefreshCw className="h-3.5 w-3.5" /> רענון
+              {refreshing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}{" "}
+              רענון
             </button>
             <Link
               href={
@@ -328,9 +356,12 @@ function BomInner() {
           overview={scope.overview}
           cardId={scope.cardId}
           versionId={scope.versionId}
-          loading={scope.loading}
+          loading={scope.loading || refreshing}
           onCardChange={selectCard}
           onBatchChange={selectBatch}
+          projects={projectOptions}
+          projectId={scopedProjectId}
+          onProjectChange={selectProject}
           buildQuantity={scope.selectedBatch?.build_quantity ?? version?.build_quantity ?? null}
           cardDefaultQuantity={scope.selectedCard?.build_quantity ?? null}
           onSaveBuildQuantity={saveBatchQuantity}
@@ -350,19 +381,14 @@ function BomInner() {
         />
       )}
 
-      {status === "pick-project" && (
+      {needsProjectPick && (
         <Card className="p-6 max-w-md mb-3">
           <label className="block text-[12px] text-slate-600 mb-1">פרויקט</label>
           <select
             value=""
             onChange={(e) => {
               const v = e.target.value;
-              if (v) {
-                const p = new URLSearchParams();
-                p.set("project_id", v);
-                if (activeTab !== "lines") p.set("tab", activeTab);
-                router.push(`/bom?${p.toString()}`);
-              }
+              if (v) selectProject(Number(v));
             }}
             className="w-full h-9 rounded-md border border-slate-200 px-2 text-[12.5px] bg-white"
           >
@@ -381,9 +407,9 @@ function BomInner() {
           versionId={versionId}
           summary={summary}
           rows={rows}
-          loading={status === "loading"}
+          loading={status === "loading" || tableLoading}
           tabQuery={tabQuery}
-          onReload={() => versionId != null && loadLines(versionId)}
+          onReload={() => void refreshBom()}
           onFilterNavigate={navigateToFilter}
           onEdit={setEditing}
           onReview={setReviewing}
@@ -453,11 +479,11 @@ function BomInner() {
           )}
 
           <Card className="overflow-hidden">
-            {status === "loading" ? (
+            {tableLoading ? (
               <div className="py-12 flex items-center justify-center gap-2 text-slate-500 text-[13px]">
                 <Loader2 className="h-4 w-4 animate-spin" /> טוען שורות BOM...
               </div>
-            ) : status === "pick-project" ? (
+            ) : needsProjectPick ? (
               <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400 text-[13px]">
                 <Inbox className="h-7 w-7" /> בחר פרויקט
               </div>

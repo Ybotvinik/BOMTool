@@ -45,6 +45,8 @@ from app.schemas.official_pricing import (
     SupplierTestResponse,
     WorkbenchExportRequest,
     PricingComparison,
+    ProjectProductionSummaryResponse,
+    CardProductionSummary,
     WorkbenchLineResult,
     WorkbenchResultsResponse,
     WorkbenchSummary,
@@ -65,6 +67,7 @@ from app.services.suppliers.official_pricing import (
     supplier_config_status,
     test_supplier_search,
 )
+from app.services.suppliers.project_production_summary import get_project_production_summary
 from app.services.suppliers.workbench import (
     clear_user_selection,
     fetch_single_line,
@@ -272,6 +275,43 @@ def get_results(
         bom_version_id=bom_version_id,
         config=SupplierConfigStatus(**supplier_config_status(get_settings())),
         lines=lines,
+    )
+
+
+@router.get("/project-production-summary", response_model=ProjectProductionSummaryResponse)
+def project_production_summary(
+    project_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> ProjectProductionSummaryResponse:
+    try:
+        data = get_project_production_summary(db, project_id=project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    cards = []
+    for card in data.get("cards") or []:
+        cmp = card.get("pricing_comparison")
+        cards.append(
+            CardProductionSummary(
+                **{
+                    **card,
+                    "pricing_comparison": PricingComparison(**cmp) if cmp else None,
+                }
+            )
+        )
+
+    return ProjectProductionSummaryResponse(
+        project_id=data["project_id"],
+        project_name=data["project_name"],
+        project_code=data["project_code"],
+        card_count=data["card_count"],
+        cards_with_bom=data["cards_with_bom"],
+        product_unit_official=data.get("product_unit_official"),
+        product_unit_east=data.get("product_unit_east"),
+        product_unit_savings=data.get("product_unit_savings"),
+        product_unit_savings_percent=data.get("product_unit_savings_percent"),
+        batch_totals=PricingComparison(**data["batch_totals"]),
+        cards=cards,
     )
 
 

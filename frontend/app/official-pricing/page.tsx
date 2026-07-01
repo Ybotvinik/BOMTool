@@ -20,6 +20,7 @@ import { EastQuotesPanel, type EastQuoteRow } from "@/components/official-pricin
 import { PricingModeSwitch } from "@/components/official-pricing/PricingModeSwitch";
 import { PricingComparisonCards } from "@/components/official-pricing/PricingComparisonCards";
 import { SingleComponentCheckPanel } from "@/components/official-pricing/SingleComponentCheckPanel";
+import { ProjectProductionSummaryPanel } from "@/components/official-pricing/ProjectProductionSummaryPanel";
 import {
   FILTERS,
   fmtPrice,
@@ -73,6 +74,7 @@ type SnapshotResponse = {
 
 const OFFICIAL_PRICING_TABS = [
   { id: "workbench", label: "מחירון BOM" },
+  { id: "production-summary", label: "סיכום ייצור" },
   { id: "component-check", label: "בדיקת רכיב בודד" },
 ] as const;
 
@@ -264,7 +266,11 @@ function OfficialPricingPageInner() {
   const urlProjectId = searchParams.get("project_id");
   const urlCardId = searchParams.get("card_id");
   const urlVersionId = searchParams.get("version_id");
-  const activeTab = (searchParams.get("tab") as OfficialPricingTab | null) ?? "workbench";
+  const activeTabRaw = searchParams.get("tab");
+  const activeTab: OfficialPricingTab =
+    OFFICIAL_PRICING_TABS.some((t) => t.id === activeTabRaw) && activeTabRaw
+      ? (activeTabRaw as OfficialPricingTab)
+      : "workbench";
   const { user } = useCurrentUser();
 
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -453,8 +459,9 @@ function OfficialPricingPageInner() {
   }, [projectId, versionId]);
 
   useEffect(() => {
+    if (activeTab !== "workbench") return;
     loadWorkbench();
-  }, [loadWorkbench]);
+  }, [loadWorkbench, activeTab]);
 
   const updateLine = (row: WorkbenchLine) => {
     setLines((prev) => prev.map((l) => (l.bom_line_id === row.bom_line_id ? row : l)));
@@ -747,6 +754,29 @@ function OfficialPricingPageInner() {
 
       {activeTab === "component-check" ? (
         <SingleComponentCheckPanel config={config} />
+      ) : activeTab === "production-summary" ? (
+        <div className="flex flex-col gap-2 min-h-0 flex-1 overflow-auto">
+          {projects.length > 1 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <label className="text-[11px] text-slate-500">פרויקט</label>
+              <select
+                className={`${selCompact} min-w-[200px]`}
+                value={projectId ?? ""}
+                onChange={(e) => selectProject(Number(e.target.value))}
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <ProjectProductionSummaryPanel
+            projectId={projectId}
+            projectName={selectedProject?.name}
+          />
+        </div>
       ) : (
         <>
 

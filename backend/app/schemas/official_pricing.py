@@ -199,6 +199,39 @@ class WorkbenchResultsResponse(BaseModel):
     pricing_comparison: PricingComparison | None = None
 
 
+class CardProductionSummary(BaseModel):
+    card_id: int
+    card_name: str
+    board_name: str | None = None
+    bom_version_id: int | None = None
+    batch_label: str | None = None
+    build_quantity: int = 0
+    bom_items_count: int = 0
+    include_east_pricing: bool = False
+    has_bom: bool = False
+    pricing_comparison: PricingComparison | None = None
+    official_unit_cost: float | None = None
+    east_unit_cost: float | None = None
+    official_batch_total: float = 0
+    east_batch_total: float = 0
+    savings_amount: float = 0
+    savings_percent: float | None = None
+
+
+class ProjectProductionSummaryResponse(BaseModel):
+    project_id: int
+    project_name: str
+    project_code: str
+    card_count: int
+    cards_with_bom: int
+    product_unit_official: float | None = None
+    product_unit_east: float | None = None
+    product_unit_savings: float | None = None
+    product_unit_savings_percent: float | None = None
+    batch_totals: PricingComparison
+    cards: list[CardProductionSummary] = Field(default_factory=list)
+
+
 class EastQuoteSummary(BaseModel):
     id: int
     supplier_name: str
