@@ -1302,7 +1302,7 @@ def build_internal_pricing_comparison_xlsx(
 
 
 _PURCHASE_SUPPLIER_FILTERS = frozenset(
-    {"all", "digikey", "mouser", "ti", "link", "manual", "tbd"}
+    {"all", "digikey", "mouser", "ti", "china", "manual", "tbd"}
 )
 
 
@@ -1316,8 +1316,11 @@ def _normalize_purchase_supplier_filter(value: str | None) -> str:
         "digikey": "digikey",
         "mouser": "mouser",
         "ti": "ti",
-        "link": "link",
-        "east": "link",
+        "china": "china",
+        "סין": "china",
+        "מזרח": "china",
+        "east": "china",
+        "link": "china",
         "manual": "manual",
         "tbd": "tbd",
         "nosolution": "tbd",
@@ -1338,9 +1341,9 @@ def _purchase_line_supplier_key(line: dict) -> str:
     if st == "tbd" or line.get("solution_status") == "No Solution":
         return "tbd"
     if st == "east_quote" or line.get("source_is_internal"):
-        return "link"
+        return "china"
     supplier = (line.get("selected_supplier") or "").lower()
-    if supplier in ("digikey", "mouser", "ti", "link"):
+    if supplier in ("digikey", "mouser", "ti"):
         return supplier
     src = (line.get("source") or "").lower()
     if "digi" in src:
@@ -1349,8 +1352,8 @@ def _purchase_line_supplier_key(line: dict) -> str:
         return "mouser"
     if src == "ti" or "texas instruments" in src:
         return "ti"
-    if "link" in src:
-        return "link"
+    if any(tok in src for tok in ("link", "china", "סין", "מזרח", "east")):
+        return "china"
     if line.get("source") == "TBD":
         return "tbd"
     return "manual"
@@ -1360,7 +1363,7 @@ def _line_in_purchase_report(line: dict, supplier_filter: str, include_east: boo
     key = _purchase_line_supplier_key(line)
     if key == "dnp":
         return False
-    if not include_east and key == "link":
+    if not include_east and key == "china":
         return False
     if supplier_filter == "all":
         if key == "tbd":
@@ -1505,7 +1508,7 @@ def build_supplier_purchase_report_xlsx(
         "digikey": "Digi-Key",
         "mouser": "Mouser",
         "ti": "TI",
-        "link": "Link",
+        "china": "סין / מזרח",
         "manual": "Manual",
         "tbd": "TBD",
     }

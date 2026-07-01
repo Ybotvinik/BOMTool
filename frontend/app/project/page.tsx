@@ -441,6 +441,10 @@ function ProjectOverviewInner() {
     versionId != null
       ? `/official-pricing?project_id=${pid}${scopeCardId != null ? `&card_id=${scopeCardId}` : ""}&version_id=${versionId}`
       : `/official-pricing?project_id=${pid}`;
+  const procurementHref =
+    versionId != null
+      ? `/procurement-file?project_id=${pid}${scopeCardId != null ? `&card_id=${scopeCardId}` : ""}&version_id=${versionId}`
+      : `/procurement-file?project_id=${pid}`;
 
   const batchQty = metrics?.effective_build_quantity ?? metrics?.batch_build_quantity ?? 1;
   const unitCost =
@@ -651,7 +655,7 @@ function ProjectOverviewInner() {
             },
             {
               label: "קובץ רכש",
-              href: `/procurement-file?project_id=${pid}`,
+              href: procurementHref,
               icon: ShoppingCart,
             },
           ].map((a) => {
@@ -827,7 +831,7 @@ function ProjectOverviewInner() {
             )}
           </dl>
           <Link
-            href={`/procurement-file?project_id=${pid}`}
+            href={procurementHref}
             className="mt-3 inline-flex items-center gap-1 text-[11px] text-brand font-medium hover:underline"
           >
             קובץ רכש לספק

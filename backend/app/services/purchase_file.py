@@ -30,7 +30,7 @@ _SUPPLIER_LABELS: dict[str, str] = {
     "digikey": "Digi-Key",
     "mouser": "Mouser",
     "ti": "TI",
-    "link": "Link",
+    "china": "סין / מזרח",
     "manual": "Manual",
     "tbd": "TBD / No Solution",
 }
@@ -135,7 +135,7 @@ def build_purchase_file(
             summary.dnp_excluded += 1
             continue
 
-        if not east_on and key == "link":
+        if not east_on and key == "china":
             pl = _to_purchase_line(raw, needs_handling=True)
             needs_handling_lines.append(pl)
             summary.needs_handling += 1

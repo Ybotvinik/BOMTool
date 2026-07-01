@@ -43,8 +43,7 @@ const CUSTOMER_CHECKLIST = [
 
 const PURCHASE_SUPPLIER_FILTERS = [
   { value: "all", label: "כל הספקים" },
-  { value: "link", label: "Link" },
-  { value: "east", label: "East" },
+  { value: "china", label: "סין / מזרח" },
   { value: "digikey", label: "Digi-Key" },
   { value: "mouser", label: "Mouser" },
   { value: "ti", label: "TI" },

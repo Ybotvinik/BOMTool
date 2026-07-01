@@ -72,7 +72,7 @@ export const SUPPLIER_FILTERS = [
   { value: "digikey", label: "Digi-Key" },
   { value: "mouser", label: "Mouser" },
   { value: "ti", label: "TI" },
-  { value: "link", label: "Link" },
+  { value: "china", label: "סין / מזרח" },
   { value: "manual", label: "Manual" },
   { value: "tbd", label: "TBD / No Solution" },
 ] as const;
