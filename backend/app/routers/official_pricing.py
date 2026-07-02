@@ -27,6 +27,7 @@ from app.schemas.official_pricing import (
     OfficialPriceLineRead,
     OfficialPriceSnapshotRead,
     OfficialPricingFetchRequest,
+    OfficialPricingFetchProgress,
     OfficialPricingFetchResponse,
     OfficialPricingLineResult,
     OfficialPricingResultsResponse,
@@ -63,6 +64,7 @@ from app.services.suppliers.component_lookup import (
 from app.services.suppliers.official_pricing import (
     create_official_snapshot,
     fetch_official_pricing,
+    get_fetch_progress,
     get_official_results,
     supplier_config_status,
     test_supplier_search,
@@ -212,6 +214,21 @@ def post_component_lookup_add_to_project(
         return ComponentLookupAddToProjectResponse(**row)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/fetch-progress", response_model=OfficialPricingFetchProgress)
+def get_fetch_progress_endpoint(
+    project_id: int = Query(...),
+    bom_version_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> OfficialPricingFetchProgress:
+    return OfficialPricingFetchProgress(
+        **get_fetch_progress(
+            db,
+            project_id=project_id,
+            bom_version_id=bom_version_id,
+        )
+    )
 
 
 @router.post("/fetch", response_model=OfficialPricingFetchResponse)

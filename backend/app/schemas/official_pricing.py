@@ -57,7 +57,19 @@ class OfficialPricingFetchResponse(BaseModel):
     priced_count: int
     missing_count: int
     error_count: int
+    retry_attempted: int = 0
+    retry_recovered: int = 0
     is_mock: bool
+
+
+class OfficialPricingFetchProgress(BaseModel):
+    running: bool
+    completed_results: int
+    total_expected: int
+    priced_count: int
+    missing_count: int
+    error_count: int
+    suppliers: list[str] = Field(default_factory=list)
 
 
 class SupplierResultCell(BaseModel):

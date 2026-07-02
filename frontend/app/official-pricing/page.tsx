@@ -60,7 +60,19 @@ type FetchResponse = {
   priced_count: number;
   missing_count: number;
   error_count: number;
+  retry_attempted?: number;
+  retry_recovered?: number;
   is_mock: boolean;
+};
+
+type FetchProgress = {
+  running: boolean;
+  completed_results: number;
+  total_expected: number;
+  priced_count: number;
+  missing_count: number;
+  error_count: number;
+  suppliers: string[];
 };
 
 type SnapshotResponse = {
@@ -281,6 +293,8 @@ function OfficialPricingPageInner() {
   const [lines, setLines] = useState<WorkbenchLine[]>([]);
   const [summary, setSummary] = useState<WorkbenchSummary | null>(null);
   const [fetchResult, setFetchResult] = useState<FetchResponse | null>(null);
+  const [fetchProgress, setFetchProgress] = useState<FetchProgress | null>(null);
+  const fetchPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
   const [snapshotName, setSnapshotName] = useState("Supplier Pricing Snapshot");
 
@@ -458,6 +472,32 @@ function OfficialPricingPageInner() {
     }
   }, [projectId, versionId]);
 
+  const pollFetchProgress = useCallback(async () => {
+    if (projectId == null || versionId == null) return;
+    try {
+      const [data, progress] = await Promise.all([
+        apiGet<WorkbenchResponse>(
+          `/api/official-pricing/workbench?project_id=${projectId}&bom_version_id=${versionId}`,
+        ),
+        apiGet<FetchProgress>(
+          `/api/official-pricing/fetch-progress?project_id=${projectId}&bom_version_id=${versionId}`,
+        ),
+      ]);
+      setLines(data.lines);
+      setSummary(data.summary);
+      setPricingComparison(data.pricing_comparison ?? null);
+      setFetchProgress(progress);
+    } catch {
+      /* ignore transient poll errors during long fetch */
+    }
+  }, [projectId, versionId]);
+
+  useEffect(() => {
+    return () => {
+      if (fetchPollRef.current != null) clearInterval(fetchPollRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (activeTab !== "workbench") return;
     loadWorkbench();
@@ -508,6 +548,12 @@ function OfficialPricingPageInner() {
     setBusy(true);
     setError(null);
     setFetchResult(null);
+    setFetchProgress(null);
+    if (fetchPollRef.current != null) clearInterval(fetchPollRef.current);
+    fetchPollRef.current = setInterval(() => {
+      void pollFetchProgress();
+    }, 3000);
+    void pollFetchProgress();
     try {
       const res = await apiPost<FetchResponse>(
         "/api/official-pricing/fetch",
@@ -519,6 +565,11 @@ function OfficialPricingPageInner() {
     } catch (e) {
       setError(String(e).replace(/^Error:\s*/, ""));
     } finally {
+      if (fetchPollRef.current != null) {
+        clearInterval(fetchPollRef.current);
+        fetchPollRef.current = null;
+      }
+      setFetchProgress(null);
       setBusy(false);
     }
   }
@@ -858,6 +909,19 @@ function OfficialPricingPageInner() {
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
             משוך מחירים
           </button>
+          {busy && fetchProgress?.running && fetchProgress.total_expected > 0 && (
+            <>
+              <span className="text-slate-200">|</span>
+              <CompactKpi
+                label="התקדמות"
+                value={`${fetchProgress.completed_results}/${fetchProgress.total_expected}`}
+                tone="muted"
+              />
+              <CompactKpi label="מתומחרות" value={String(fetchProgress.priced_count)} tone="good" />
+              <CompactKpi label="חסרות" value={String(fetchProgress.missing_count)} tone="warn" />
+              <CompactKpi label="שגיאות" value={String(fetchProgress.error_count)} tone="bad" />
+            </>
+          )}
           {fetchResult && (
             <>
               <span className="text-slate-200">|</span>
@@ -865,6 +929,13 @@ function OfficialPricingPageInner() {
               <CompactKpi label="מתומחרות" value={String(fetchResult.priced_count)} tone="good" />
               <CompactKpi label="חסרות" value={String(fetchResult.missing_count)} tone="warn" />
               <CompactKpi label="שגיאות" value={String(fetchResult.error_count)} tone="bad" />
+              {(fetchResult.retry_attempted ?? 0) > 0 && (
+                <CompactKpi
+                  label="הצליחו בחוזר"
+                  value={`${fetchResult.retry_recovered ?? 0}/${fetchResult.retry_attempted}`}
+                  tone={(fetchResult.retry_recovered ?? 0) > 0 ? "good" : "muted"}
+                />
+              )}
             </>
           )}
         </div>
