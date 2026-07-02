@@ -150,3 +150,14 @@ export function fmtPrice(v: number | null | undefined, currency = "USD") {
     maximumFractionDigits: fractionDigits,
   }).format(v);
 }
+
+export const NO_EAST_PRICE_LABEL = "ללא מחיר סין";
+
+export function fmtEastPrice(
+  v: number | null | undefined,
+  hasEastPricing: boolean,
+  currency = "USD",
+) {
+  if (!hasEastPricing) return NO_EAST_PRICE_LABEL;
+  return fmtPrice(v, currency);
+}

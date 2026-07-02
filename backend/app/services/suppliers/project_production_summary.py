@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import BomVersion, Project, ProjectCard
 from app.services.project_build import effective_build_quantity
 from app.services.project_overview import build_project_overview
+from app.services.east_quotes.service import has_active_east_quotes
 from app.services.suppliers.workbench import get_workbench_results
 
 
@@ -56,6 +57,7 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
     product_unit_east = 0.0
     has_unit_official = False
     has_unit_east = False
+    project_has_east_pricing = False
     cards_with_bom = 0
 
     for card in overview.get("cards") or []:
@@ -74,6 +76,7 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
             "build_quantity": 0,
             "bom_items_count": bom_items,
             "include_east_pricing": False,
+            "has_east_pricing": False,
             "has_bom": has_bom,
             "pricing_comparison": None,
             "official_unit_cost": None,
@@ -100,39 +103,59 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
         east_total = float(east.get("total") or 0)
         savings_amount = off_total - east_total
         savings_percent = (savings_amount / off_total * 100) if off_total > 0 else None
+        has_east_pricing = has_active_east_quotes(
+            db, project_id=project_id, bom_version_id=batch_id
+        )
 
         entry["build_quantity"] = build_qty
         entry["include_east_pricing"] = bool(wb.get("include_east_pricing"))
-        entry["pricing_comparison"] = cmp
+        entry["has_east_pricing"] = has_east_pricing
+        entry["pricing_comparison"] = cmp if has_east_pricing else None
         entry["official_batch_total"] = off_total
-        entry["east_batch_total"] = east_total
-        entry["savings_amount"] = savings_amount
-        entry["savings_percent"] = savings_percent
+        if has_east_pricing:
+            project_has_east_pricing = True
+            entry["east_batch_total"] = east_total
+            entry["savings_amount"] = savings_amount
+            entry["savings_percent"] = savings_percent
+            if build_qty > 0 and east_total > 0:
+                entry["east_unit_cost"] = east_total / build_qty
+                has_unit_east = True
+                product_unit_east += east_total / build_qty
+            _merge_scenario_stats(agg_east, east)
+        else:
+            entry["east_batch_total"] = None
+            entry["savings_amount"] = 0.0
+            entry["savings_percent"] = None
+
         if build_qty > 0 and off_total > 0:
             entry["official_unit_cost"] = off_total / build_qty
             has_unit_official = True
             product_unit_official += off_total / build_qty
-        if build_qty > 0 and east_total > 0:
-            entry["east_unit_cost"] = east_total / build_qty
-            has_unit_east = True
-            product_unit_east += east_total / build_qty
 
         _merge_scenario_stats(agg_official, off)
-        _merge_scenario_stats(agg_east, east)
         cards_out.append(entry)
 
     batch_savings = float(agg_official["total"]) - float(agg_east["total"])
     batch_savings_pct = (
         batch_savings / float(agg_official["total"]) * 100
-        if agg_official["total"] > 0
+        if agg_official["total"] > 0 and project_has_east_pricing
         else None
     )
     product_savings = None
     product_savings_pct = None
-    if has_unit_official and has_unit_east:
+    if has_unit_official and has_unit_east and project_has_east_pricing:
         product_savings = product_unit_official - product_unit_east
         if product_unit_official > 0:
             product_savings_pct = product_savings / product_unit_official * 100
+
+    empty_east_stats = {
+        "total": 0.0,
+        "priced_lines": 0,
+        "needs_approval": 0,
+        "no_solution": 0,
+        "no_stock": 0,
+        "east_selected_lines": 0,
+    }
 
     return {
         "project_id": project.id,
@@ -140,17 +163,18 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
         "project_code": project.code,
         "card_count": len(overview.get("cards") or []),
         "cards_with_bom": cards_with_bom,
+        "has_east_pricing": project_has_east_pricing,
         "product_unit_official": product_unit_official if has_unit_official else None,
-        "product_unit_east": product_unit_east if has_unit_east else None,
+        "product_unit_east": product_unit_east if has_unit_east and project_has_east_pricing else None,
         "product_unit_savings": product_savings,
         "product_unit_savings_percent": product_savings_pct,
         "batch_totals": {
             "official_only": agg_official,
-            "with_east": agg_east,
+            "with_east": agg_east if project_has_east_pricing else empty_east_stats,
             "savings": {
-                "amount": batch_savings,
+                "amount": batch_savings if project_has_east_pricing else 0.0,
                 "percent": batch_savings_pct,
-                "is_saving": batch_savings > 0,
+                "is_saving": batch_savings > 0 if project_has_east_pricing else False,
             },
         },
         "cards": cards_out,

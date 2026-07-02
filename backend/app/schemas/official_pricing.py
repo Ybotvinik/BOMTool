@@ -207,6 +207,7 @@ class WorkbenchResultsResponse(BaseModel):
     summary: WorkbenchSummary
     lines: list[WorkbenchLineResult]
     include_east_pricing: bool = False
+    has_east_pricing: bool = False
     east_quotes: list[dict] = Field(default_factory=list)
     pricing_comparison: PricingComparison | None = None
 
@@ -220,12 +221,13 @@ class CardProductionSummary(BaseModel):
     build_quantity: int = 0
     bom_items_count: int = 0
     include_east_pricing: bool = False
+    has_east_pricing: bool = False
     has_bom: bool = False
     pricing_comparison: PricingComparison | None = None
     official_unit_cost: float | None = None
     east_unit_cost: float | None = None
     official_batch_total: float = 0
-    east_batch_total: float = 0
+    east_batch_total: float | None = None
     savings_amount: float = 0
     savings_percent: float | None = None
 
@@ -236,6 +238,7 @@ class ProjectProductionSummaryResponse(BaseModel):
     project_code: str
     card_count: int
     cards_with_bom: int
+    has_east_pricing: bool = False
     product_unit_official: float | None = None
     product_unit_east: float | None = None
     product_unit_savings: float | None = None

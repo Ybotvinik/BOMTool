@@ -323,6 +323,7 @@ def project_production_summary(
         project_code=data["project_code"],
         card_count=data["card_count"],
         cards_with_bom=data["cards_with_bom"],
+        has_east_pricing=data.get("has_east_pricing", False),
         product_unit_official=data.get("product_unit_official"),
         product_unit_east=data.get("product_unit_east"),
         product_unit_savings=data.get("product_unit_savings"),
@@ -352,6 +353,7 @@ def get_workbench(
         summary=WorkbenchSummary(**data["summary"]),
         lines=[WorkbenchLineResult(**ln) for ln in data["lines"]],
         include_east_pricing=data.get("include_east_pricing", False),
+        has_east_pricing=data.get("has_east_pricing", False),
         east_quotes=data.get("east_quotes", []),
         pricing_comparison=(
             PricingComparison(**data["pricing_comparison"])

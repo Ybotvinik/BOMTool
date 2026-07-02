@@ -50,6 +50,7 @@ type WorkbenchResponse = {
   summary: WorkbenchSummary;
   lines: WorkbenchLine[];
   include_east_pricing: boolean;
+  has_east_pricing: boolean;
   east_quotes: EastQuoteRow[];
   pricing_comparison: PricingComparison | null;
 };
@@ -316,6 +317,7 @@ function OfficialPricingPageInner() {
   const [manualBusy, setManualBusy] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [includeEast, setIncludeEast] = useState(false);
+  const [hasEastPricing, setHasEastPricing] = useState(false);
   const [eastQuotes, setEastQuotes] = useState<EastQuoteRow[]>([]);
   const [pricingComparison, setPricingComparison] = useState<PricingComparison | null>(null);
   const [manualForm, setManualForm] = useState({
@@ -460,6 +462,7 @@ function OfficialPricingPageInner() {
       setLines(data.lines);
       setSummary(data.summary);
       setIncludeEast(data.include_east_pricing);
+      setHasEastPricing(data.has_east_pricing);
       setEastQuotes(data.east_quotes ?? []);
       setPricingComparison(data.pricing_comparison ?? null);
       setError(null);
@@ -877,9 +880,10 @@ function OfficialPricingPageInner() {
 
       <PricingComparisonCards
         comparison={pricingComparison}
-        activeModeEast={includeEast}
+        activeModeEast={includeEast && hasEastPricing}
         buildQuantity={batchBuildQuantity}
         summary={summary}
+        eastPricingAvailable={hasEastPricing}
       />
 
       <Card className="p-1.5 flex flex-col min-h-0 flex-1 overflow-hidden">
