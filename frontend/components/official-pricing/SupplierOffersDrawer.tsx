@@ -8,12 +8,12 @@ import { fmtPrice, type SupplierOffer, type WorkbenchLine } from "./types";
 type Props = {
   line: WorkbenchLine | null;
   includeEast: boolean;
-  fetchingSupplier: string | null;
+  fetchingSupplier?: string | null;
   fetchingAll?: boolean;
   onClose: () => void;
   onSelectSupplier: (supplier: string, needsReview: boolean, internalOnly?: boolean) => void;
-  onFetchSupplier: (supplier: string) => void;
-  onFetchAllSuppliers: () => void;
+  onFetchSupplier?: (supplier: string) => void;
+  onFetchAllSuppliers?: () => void;
   onSelectTbd: () => void;
   onSelectDnp: () => void;
   onOpenManual: () => void;
@@ -236,7 +236,7 @@ function OfferCard({
 export function SupplierOffersDrawer({
   line,
   includeEast,
-  fetchingSupplier,
+  fetchingSupplier = null,
   fetchingAll = false,
   onClose,
   onSelectSupplier,
@@ -251,7 +251,8 @@ export function SupplierOffersDrawer({
   const apiOffers = line.offers.filter((o) => !o.internal_only);
   const eastOffers = line.offers.filter((o) => o.internal_only);
   const lp = line.line_pricing;
-  const anyFetchable = apiOffers.some((o) => needsFetch(o));
+  const canFetch = Boolean(onFetchSupplier && onFetchAllSuppliers);
+  const anyFetchable = canFetch && apiOffers.some((o) => needsFetch(o));
 
   return (
     <div className="fixed inset-0 z-50 flex justify-start">
@@ -311,7 +312,7 @@ export function SupplierOffersDrawer({
           <section>
             <div className="flex items-center justify-between gap-2 mb-2">
               <p className="text-[11px] font-semibold text-slate-600">א. מחירי API רשמיים</p>
-              {apiOffers.length > 0 && (
+              {apiOffers.length > 0 && canFetch && (
                 <button
                   type="button"
                   disabled={fetchingAll || fetchingSupplier != null}
@@ -336,7 +337,7 @@ export function SupplierOffersDrawer({
                     key={offer.supplier}
                     offer={offer}
                     fetching={fetchingSupplier === offer.supplier}
-                    onFetch={() => onFetchSupplier(offer.supplier)}
+                    onFetch={onFetchSupplier ? () => onFetchSupplier(offer.supplier) : undefined}
                     onSelect={() => onSelectSupplier(offer.supplier, offer.needs_review, false)}
                   />
                 ))}
