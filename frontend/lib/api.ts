@@ -1,8 +1,18 @@
 // Thin API client for the FastAPI backend. The current user id is forwarded
 // via the X-User-Id header so the backend can attribute activity_log entries.
 
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+function getApiUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  if (typeof window !== "undefined") {
+    return "";
+  }
+
+  return "http://localhost:8000";
+}
+
+export const API_URL = getApiUrl();
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, { cache: "no-store" });

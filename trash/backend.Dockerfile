@@ -1,10 +1,11 @@
 FROM python:3.12-slim
 
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 
+# System deps for psycopg2 runtime and bash for entrypoint.sh (pipefail).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bash libpq5 \
     && rm -rf /var/lib/apt/lists/*
@@ -14,6 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+RUN chmod +x entrypoint.sh entrypoint.aws.sh
+
 EXPOSE 8000
 
-CMD ["bash", "-c", "sed 's/\\r$//' entrypoint.prod.sh | bash -s"]
+CMD ["bash", "entrypoint.sh"]
