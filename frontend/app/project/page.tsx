@@ -30,6 +30,7 @@ import {
   type ProjectParamsForm,
 } from "@/components/project/EditProjectParamsModal";
 import { ProjectScopeBar } from "@/components/project/ProjectScopeBar";
+import { ProjectMultiCardSummary } from "@/components/project/ProjectMultiCardSummary";
 import { apiDownloadPost, apiGet, apiPatch, triggerBlobDownload } from "@/lib/api";
 import {
   projectOverviewHref,
@@ -489,6 +490,8 @@ function ProjectOverviewInner() {
       ? Math.round((metrics.official_priced_lines / metrics.bom_non_dnp_lines) * 100)
       : null;
 
+  const isMultiCard = overview.cards.length > 1;
+
   return (
     <div className="space-y-4 pb-8">
       {error && (
@@ -508,6 +511,17 @@ function ProjectOverviewInner() {
         onSaveBuildQuantity={saveBatchQuantity}
         savingQty={qtySaving}
       />
+
+      {isMultiCard && (
+        <ProjectMultiCardSummary
+          projectId={pid}
+          currentCardId={scopeCardId}
+          onSelectCard={(cardId, versionId) => {
+            if (versionId != null) void selectBatch(versionId);
+            else void selectCard(cardId);
+          }}
+        />
+      )}
 
       {!metrics ? (
         <Card className="p-8 text-center text-slate-500 text-[13px]">
@@ -578,14 +592,18 @@ function ProjectOverviewInner() {
             </div>
             <div className="flex gap-2 shrink-0">
               <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2 min-w-[130px] text-right">
-                <div className="text-[10px] text-emerald-800 font-medium">עלות כרטיס בודד</div>
+                <div className="text-[10px] text-emerald-800 font-medium">
+                  {isMultiCard ? "עלות כרטיס נוכחי" : "עלות כרטיס בודד"}
+                </div>
                 <div className="text-[22px] font-bold text-emerald-900 tabular-nums leading-tight mt-0.5">
                   {fmtMoney(unitCost)}
                 </div>
                 <div className="text-[9px] text-emerald-700/80 mt-0.5">לפי מחירון נוכחי</div>
               </div>
               <div className="rounded-lg bg-white/80 border border-slate-200 px-4 py-2 min-w-[130px] text-right">
-                <div className="text-[10px] text-slate-600 font-medium">סה״כ רכש למנה</div>
+                <div className="text-[10px] text-slate-600 font-medium">
+                  {isMultiCard ? "רכש למנה — כרטיס נוכחי" : "סה״כ רכש למנה"}
+                </div>
                 <div className="text-[20px] font-bold text-slate-800 tabular-nums leading-tight mt-0.5">
                   {fmtMoney(metrics.official_selected_total)}
                 </div>

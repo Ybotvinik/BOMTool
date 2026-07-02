@@ -230,6 +230,28 @@ class CardProductionSummary(BaseModel):
     east_batch_total: float | None = None
     savings_amount: float = 0
     savings_percent: float | None = None
+    bom_quality_score: float | None = None
+    bom_error_count: int = 0
+    bom_needs_review_count: int = 0
+    priced_lines: int = 0
+    needs_approval: int = 0
+    no_solution: int = 0
+    no_stock: int = 0
+    has_solution: int = 0
+    batch_selection: str = "none"
+
+
+class ProjectRollupTotals(BaseModel):
+    bom_lines: int = 0
+    bom_quality_score: float | None = None
+    bom_error_count: int = 0
+    bom_needs_review_count: int = 0
+    priced_lines: int = 0
+    needs_approval: int = 0
+    no_solution: int = 0
+    no_stock: int = 0
+    has_solution: int = 0
+    cards_missing_bom: int = 0
 
 
 class ProjectProductionSummaryResponse(BaseModel):
@@ -244,6 +266,7 @@ class ProjectProductionSummaryResponse(BaseModel):
     product_unit_savings: float | None = None
     product_unit_savings_percent: float | None = None
     batch_totals: PricingComparison
+    project_totals: ProjectRollupTotals = Field(default_factory=ProjectRollupTotals)
     cards: list[CardProductionSummary] = Field(default_factory=list)
 
 

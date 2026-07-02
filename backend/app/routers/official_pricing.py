@@ -47,6 +47,7 @@ from app.schemas.official_pricing import (
     WorkbenchExportRequest,
     PricingComparison,
     ProjectProductionSummaryResponse,
+    ProjectRollupTotals,
     CardProductionSummary,
     WorkbenchLineResult,
     WorkbenchResultsResponse,
@@ -329,6 +330,7 @@ def project_production_summary(
         product_unit_savings=data.get("product_unit_savings"),
         product_unit_savings_percent=data.get("product_unit_savings_percent"),
         batch_totals=PricingComparison(**data["batch_totals"]),
+        project_totals=ProjectRollupTotals(**(data.get("project_totals") or {})),
         cards=cards,
     )
 

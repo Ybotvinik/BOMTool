@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BomVersion, Project, ProjectCard
+from app.models import BomLine, BomVersion, Project, ProjectCard
+from app.services.bom_quality import compute_quality_summary
+from app.services.east_quotes.service import has_active_east_quotes
 from app.services.project_build import effective_build_quantity
 from app.services.project_overview import build_project_overview
-from app.services.east_quotes.service import has_active_east_quotes
 from app.services.suppliers.workbench import get_workbench_results
 
 
-def _default_batch(card: dict, active_version_id: int | None) -> dict | None:
+def _default_batch(
+    card: dict, active_version_id: int | None
+) -> tuple[dict | None, str]:
     batches = card.get("batches") or []
     if not batches:
-        return None
-    if active_version_id is not None:
+        return None, "none"
+    card_ids = {b["id"] for b in batches}
+    if active_version_id is not None and active_version_id in card_ids:
         for batch in batches:
             if batch["id"] == active_version_id:
-                return batch
+                return batch, "active"
     active = next((b for b in batches if b.get("is_project_active")), None)
-    return active or batches[-1]
+    if active is not None:
+        return active, "project_active"
+    return batches[-1], "latest"
 
 
 def _merge_scenario_stats(target: dict, source: dict) -> None:
@@ -35,6 +42,7 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
 
     overview = build_project_overview(db, project_id)
     active_version_id = overview.get("active_version_id")
+    all_cards = overview.get("cards") or []
 
     cards_out: list[dict] = []
     agg_official = {
@@ -60,8 +68,21 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
     project_has_east_pricing = False
     cards_with_bom = 0
 
-    for card in overview.get("cards") or []:
-        batch = _default_batch(card, active_version_id)
+    proj_totals = {
+        "bom_lines": 0,
+        "bom_error_count": 0,
+        "bom_needs_review_count": 0,
+        "priced_lines": 0,
+        "needs_approval": 0,
+        "no_solution": 0,
+        "no_stock": 0,
+        "has_solution": 0,
+    }
+    quality_weighted_sum = 0.0
+    quality_weight = 0
+
+    for card in all_cards:
+        batch, batch_selection = _default_batch(card, active_version_id)
         batch_id = batch["id"] if batch else None
         batch_label = batch.get("batch_label") if batch else None
         bom_items = int(batch.get("bom_items_count") or 0) if batch else 0
@@ -82,9 +103,18 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
             "official_unit_cost": None,
             "east_unit_cost": None,
             "official_batch_total": 0.0,
-            "east_batch_total": 0.0,
+            "east_batch_total": None,
             "savings_amount": 0.0,
             "savings_percent": None,
+            "bom_quality_score": None,
+            "bom_error_count": 0,
+            "bom_needs_review_count": 0,
+            "priced_lines": 0,
+            "needs_approval": 0,
+            "no_solution": 0,
+            "no_stock": 0,
+            "has_solution": 0,
+            "batch_selection": batch_selection,
         }
 
         if not has_bom:
@@ -97,6 +127,7 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
         project_card = db.get(ProjectCard, card["id"])
         build_qty = effective_build_quantity(version, card=project_card, project=project)
         cmp = wb.get("pricing_comparison") or {}
+        wb_summary = wb.get("summary") or {}
         off = cmp.get("official_only") or {}
         east = cmp.get("with_east") or {}
         off_total = float(off.get("total") or 0)
@@ -107,11 +138,45 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
             db, project_id=project_id, bom_version_id=batch_id
         )
 
+        bom_lines = list(
+            db.scalars(select(BomLine).where(BomLine.bom_version_id == batch_id))
+        )
+        quality = compute_quality_summary(bom_lines)
+        q_score = quality.get("quality_score")
+        bom_errors = int(quality.get("error_count") or 0)
+        bom_needs = int(quality.get("needs_review_count") or 0)
+        priced = int(off.get("priced_lines") or 0)
+        needs_appr = int(off.get("needs_approval") or 0)
+        no_sol = int(off.get("no_solution") or 0)
+        no_stk = int(off.get("no_stock") or 0)
+        has_sol = int(wb_summary.get("has_solution") or 0)
+
         entry["build_quantity"] = build_qty
         entry["include_east_pricing"] = bool(wb.get("include_east_pricing"))
         entry["has_east_pricing"] = has_east_pricing
         entry["pricing_comparison"] = cmp if has_east_pricing else None
         entry["official_batch_total"] = off_total
+        entry["bom_quality_score"] = float(q_score) if q_score is not None else None
+        entry["bom_error_count"] = bom_errors
+        entry["bom_needs_review_count"] = bom_needs
+        entry["priced_lines"] = priced
+        entry["needs_approval"] = needs_appr
+        entry["no_solution"] = no_sol
+        entry["no_stock"] = no_stk
+        entry["has_solution"] = has_sol
+
+        proj_totals["bom_lines"] += bom_items
+        proj_totals["bom_error_count"] += bom_errors
+        proj_totals["bom_needs_review_count"] += bom_needs
+        proj_totals["priced_lines"] += priced
+        proj_totals["needs_approval"] += needs_appr
+        proj_totals["no_solution"] += no_sol
+        proj_totals["no_stock"] += no_stk
+        proj_totals["has_solution"] += has_sol
+        if q_score is not None and bom_items > 0:
+            quality_weighted_sum += float(q_score) * bom_items
+            quality_weight += bom_items
+
         if has_east_pricing:
             project_has_east_pricing = True
             entry["east_batch_total"] = east_total
@@ -122,10 +187,6 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
                 has_unit_east = True
                 product_unit_east += east_total / build_qty
             _merge_scenario_stats(agg_east, east)
-        else:
-            entry["east_batch_total"] = None
-            entry["savings_amount"] = 0.0
-            entry["savings_percent"] = None
 
         if build_qty > 0 and off_total > 0:
             entry["official_unit_cost"] = off_total / build_qty
@@ -157,11 +218,15 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
         "east_selected_lines": 0,
     }
 
+    project_quality_score = (
+        round(quality_weighted_sum / quality_weight, 1) if quality_weight > 0 else None
+    )
+
     return {
         "project_id": project.id,
         "project_name": project.name,
         "project_code": project.code,
-        "card_count": len(overview.get("cards") or []),
+        "card_count": len(all_cards),
         "cards_with_bom": cards_with_bom,
         "has_east_pricing": project_has_east_pricing,
         "product_unit_official": product_unit_official if has_unit_official else None,
@@ -176,6 +241,11 @@ def get_project_production_summary(db: Session, *, project_id: int) -> dict:
                 "percent": batch_savings_pct,
                 "is_saving": batch_savings > 0 if project_has_east_pricing else False,
             },
+        },
+        "project_totals": {
+            **proj_totals,
+            "bom_quality_score": project_quality_score,
+            "cards_missing_bom": len(all_cards) - cards_with_bom,
         },
         "cards": cards_out,
     }

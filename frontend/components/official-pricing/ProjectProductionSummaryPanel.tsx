@@ -15,6 +15,7 @@ import clsx from "clsx";
 import { Card } from "@/components/ui";
 import { PricingComparisonCards } from "@/components/official-pricing/PricingComparisonCards";
 import { fmtEastPrice, fmtPrice, type PricingComparison } from "@/components/official-pricing/types";
+import { qualityScoreTone } from "@/components/bom/types";
 import { apiGet } from "@/lib/api";
 
 type CardProductionSummary = {
@@ -35,6 +36,28 @@ type CardProductionSummary = {
   east_batch_total: number | null;
   savings_amount: number;
   savings_percent: number | null;
+  bom_quality_score: number | null;
+  bom_error_count: number;
+  bom_needs_review_count: number;
+  priced_lines: number;
+  needs_approval: number;
+  no_solution: number;
+  no_stock: number;
+  has_solution: number;
+  batch_selection: string;
+};
+
+type ProjectRollupTotals = {
+  bom_lines: number;
+  bom_quality_score: number | null;
+  bom_error_count: number;
+  bom_needs_review_count: number;
+  priced_lines: number;
+  needs_approval: number;
+  no_solution: number;
+  no_stock: number;
+  has_solution: number;
+  cards_missing_bom: number;
 };
 
 type ProjectProductionSummary = {
@@ -49,6 +72,7 @@ type ProjectProductionSummary = {
   product_unit_savings: number | null;
   product_unit_savings_percent: number | null;
   batch_totals: PricingComparison;
+  project_totals: ProjectRollupTotals;
   cards: CardProductionSummary[];
 };
 
@@ -236,6 +260,56 @@ export function ProjectProductionSummaryPanel({
             />
           </div>
 
+          {data.project_totals && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 shrink-0">
+              <Kpi
+                label="שורות BOM (פרויקט)"
+                value={String(data.project_totals.bom_lines)}
+                sub={`${data.project_totals.has_solution} עם פתרון`}
+              />
+              <Kpi
+                label="ציון איכות ממוצע"
+                value={
+                  data.project_totals.bom_quality_score != null
+                    ? String(Math.round(data.project_totals.bom_quality_score))
+                    : "—"
+                }
+                tone={
+                  qualityScoreTone(data.project_totals.bom_quality_score ?? 0) === "good"
+                    ? "good"
+                    : qualityScoreTone(data.project_totals.bom_quality_score ?? 0) === "warn"
+                      ? "warn"
+                      : "brand"
+                }
+              />
+              <Kpi
+                label="אין פתרון"
+                value={String(data.project_totals.no_solution)}
+                tone={data.project_totals.no_solution > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="דורש אישור"
+                value={String(data.project_totals.needs_approval)}
+                tone={data.project_totals.needs_approval > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="אין מלאי"
+                value={String(data.project_totals.no_stock)}
+                tone={data.project_totals.no_stock > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="שגיאות איכות"
+                value={String(data.project_totals.bom_error_count)}
+                tone={data.project_totals.bom_error_count > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="כרטיסים ללא BOM"
+                value={String(data.project_totals.cards_missing_bom)}
+                tone={data.project_totals.cards_missing_bom > 0 ? "warn" : "default"}
+              />
+            </div>
+          )}
+
           <PricingComparisonCards
             comparison={data.batch_totals}
             activeModeEast={data.has_east_pricing && data.cards.some((c) => c.include_east_pricing)}
@@ -336,6 +410,10 @@ export function ProjectProductionSummaryPanel({
                     <th className="text-start px-3 py-2 font-medium">כרטיס</th>
                     <th className="text-start px-2 py-2 font-medium">מנה</th>
                     <th className="text-end px-2 py-2 font-medium">כמות</th>
+                    <th className="text-end px-2 py-2 font-medium">שורות</th>
+                    <th className="text-end px-2 py-2 font-medium">איכות</th>
+                    <th className="text-end px-2 py-2 font-medium">ללא מחיר</th>
+                    <th className="text-end px-2 py-2 font-medium">אישור</th>
                     <th className="text-end px-2 py-2 font-medium">רשמי/יח׳</th>
                     <th className="text-end px-2 py-2 font-medium">משולב/יח׳</th>
                     <th className="text-end px-2 py-2 font-medium">סה״כ רשמי</th>
@@ -370,6 +448,8 @@ function CardRow({ card, projectId }: { card: CardProductionSummary; projectId: 
   const batchLabel =
     card.batch_label ||
     (card.bom_version_id != null ? `מנה #${card.bom_version_id}` : "—");
+  const qTone =
+    card.bom_quality_score != null ? qualityScoreTone(card.bom_quality_score) : "muted";
 
   return (
     <tr className={clsx("border-b border-slate-50", !card.has_bom && "opacity-60")}>
@@ -382,6 +462,23 @@ function CardRow({ card, projectId }: { card: CardProductionSummary; projectId: 
       </td>
       <td className="px-2 py-2 text-end tabular-nums">
         {card.has_bom ? card.build_quantity.toLocaleString() : "—"}
+      </td>
+      <td className="px-2 py-2 text-end tabular-nums text-slate-600">
+        {card.has_bom ? card.bom_items_count : "—"}
+      </td>
+      <td
+        className={clsx(
+          "px-2 py-2 text-end tabular-nums font-medium",
+          qTone === "good" ? "text-green-700" : qTone === "warn" ? "text-amber-700" : "text-red-700",
+        )}
+      >
+        {card.bom_quality_score != null ? Math.round(card.bom_quality_score) : "—"}
+      </td>
+      <td className="px-2 py-2 text-end tabular-nums text-red-700">
+        {card.has_bom && card.no_solution > 0 ? card.no_solution : "—"}
+      </td>
+      <td className="px-2 py-2 text-end tabular-nums text-amber-700">
+        {card.has_bom && card.needs_approval > 0 ? card.needs_approval : "—"}
       </td>
       <td className="px-2 py-2 text-end tabular-nums">{fmtPrice(card.official_unit_cost)}</td>
       <td className="px-2 py-2 text-end tabular-nums text-slate-500">
