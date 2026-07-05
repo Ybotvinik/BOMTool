@@ -149,6 +149,13 @@ def get_active_east_quotes(
     )
 
 
+def has_active_east_quotes(
+    db: Session, *, project_id: int, bom_version_id: int
+) -> bool:
+    """True when at least one active east/China quote exists for this BOM version."""
+    return bool(get_active_east_quotes(db, project_id=project_id, bom_version_id=bom_version_id))
+
+
 PREVIEW_ROWS = 8
 
 

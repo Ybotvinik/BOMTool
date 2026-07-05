@@ -34,7 +34,11 @@ from app.services.suppliers.base import (
     SupplierPriceResult,
     normalize_mpn,
 )
-from app.services.east_quotes.service import east_offers_by_bom_line, list_east_quotes
+from app.services.east_quotes.service import (
+    east_offers_by_bom_line,
+    has_active_east_quotes,
+    list_east_quotes,
+)
 from app.services.line_description import resolve_line_display_description
 from app.services.suppliers.digikey import DigiKeyClient
 from app.services.suppliers.mouser import MouserClient
@@ -897,11 +901,15 @@ def get_workbench_results(
     east_total = with_east_stats["total"]
     savings_amount = off_total - east_total
     savings_percent = (savings_amount / off_total * 100) if off_total > 0 else None
+    has_east_pricing = has_active_east_quotes(
+        db, project_id=project_id, bom_version_id=bom_version_id
+    )
 
     return {
         "lines": lines,
         "summary": summary,
         "include_east_pricing": include_east,
+        "has_east_pricing": has_east_pricing,
         "east_quotes": list_east_quotes(
             db, project_id=project_id, bom_version_id=bom_version_id
         ),

@@ -14,7 +14,8 @@ import {
 import clsx from "clsx";
 import { Card } from "@/components/ui";
 import { PricingComparisonCards } from "@/components/official-pricing/PricingComparisonCards";
-import { fmtPrice, type PricingComparison } from "@/components/official-pricing/types";
+import { fmtEastPrice, fmtPrice, type PricingComparison } from "@/components/official-pricing/types";
+import { qualityScoreTone } from "@/components/bom/types";
 import { apiGet } from "@/lib/api";
 
 type CardProductionSummary = {
@@ -26,14 +27,37 @@ type CardProductionSummary = {
   build_quantity: number;
   bom_items_count: number;
   include_east_pricing: boolean;
+  has_east_pricing: boolean;
   has_bom: boolean;
   pricing_comparison: PricingComparison | null;
   official_unit_cost: number | null;
   east_unit_cost: number | null;
   official_batch_total: number;
-  east_batch_total: number;
+  east_batch_total: number | null;
   savings_amount: number;
   savings_percent: number | null;
+  bom_quality_score: number | null;
+  bom_error_count: number;
+  bom_needs_review_count: number;
+  priced_lines: number;
+  needs_approval: number;
+  no_solution: number;
+  no_stock: number;
+  has_solution: number;
+  batch_selection: string;
+};
+
+type ProjectRollupTotals = {
+  bom_lines: number;
+  bom_quality_score: number | null;
+  bom_error_count: number;
+  bom_needs_review_count: number;
+  priced_lines: number;
+  needs_approval: number;
+  no_solution: number;
+  no_stock: number;
+  has_solution: number;
+  cards_missing_bom: number;
 };
 
 type ProjectProductionSummary = {
@@ -42,11 +66,13 @@ type ProjectProductionSummary = {
   project_code: string;
   card_count: number;
   cards_with_bom: number;
+  has_east_pricing: boolean;
   product_unit_official: number | null;
   product_unit_east: number | null;
   product_unit_savings: number | null;
   product_unit_savings_percent: number | null;
   batch_totals: PricingComparison;
+  project_totals: ProjectRollupTotals;
   cards: CardProductionSummary[];
 };
 
@@ -122,8 +148,10 @@ export function ProjectProductionSummaryPanel({
   const profitCalc = useMemo(() => {
     const sell = Number(sellPrice);
     const units = Number(unitsToProduce);
-    if (!data?.product_unit_east || !Number.isFinite(sell) || sell <= 0) return null;
-    const costPerUnit = data.product_unit_east;
+    if (!data?.product_unit_official || !Number.isFinite(sell) || sell <= 0) return null;
+    const costPerUnit = data.has_east_pricing
+      ? (data.product_unit_east ?? data.product_unit_official)
+      : data.product_unit_official;
     const marginPerUnit = sell - costPerUnit;
     const marginPct = (marginPerUnit / sell) * 100;
     const batchUnits = Number.isFinite(units) && units > 0 ? units : minBuildQty;
@@ -135,7 +163,9 @@ export function ProjectProductionSummaryPanel({
         ? data.product_unit_official * batchUnits
         : null;
     const savingsVsOfficial =
-      officialCost != null && batchCostEast != null ? officialCost - batchCostEast : null;
+      data.has_east_pricing && officialCost != null && batchCostEast != null
+        ? officialCost - batchCostEast
+        : null;
     return {
       marginPerUnit,
       marginPct,
@@ -193,19 +223,25 @@ export function ProjectProductionSummaryPanel({
             />
             <Kpi
               label="עלות מוצר — משולב"
-              value={fmtPrice(data.product_unit_east)}
-              sub="רכש פנימי מזרח"
-              tone="good"
+              value={fmtEastPrice(data.product_unit_east, data.has_east_pricing)}
+              sub={data.has_east_pricing ? "רכש פנימי מזרח" : "לא הועלה מחירון סין"}
+              tone={data.has_east_pricing ? "good" : "warn"}
             />
             <Kpi
               label="חיסכון ליחידה"
-              value={fmtPrice(data.product_unit_savings)}
+              value={
+                data.has_east_pricing
+                  ? fmtPrice(data.product_unit_savings)
+                  : "ללא מחיר סין"
+              }
               sub={
-                data.product_unit_savings_percent != null
+                data.has_east_pricing && data.product_unit_savings_percent != null
                   ? `${data.product_unit_savings_percent.toFixed(1)}% מול רשמי`
                   : undefined
               }
-              tone={(data.product_unit_savings ?? 0) > 0 ? "good" : "warn"}
+              tone={
+                data.has_east_pricing && (data.product_unit_savings ?? 0) > 0 ? "good" : "warn"
+              }
             />
             <Kpi
               label="סה״כ רכש רשמי"
@@ -214,15 +250,70 @@ export function ProjectProductionSummaryPanel({
             />
             <Kpi
               label="סה״כ רכש משולב"
-              value={fmtPrice(data.batch_totals.with_east.total)}
-              sub={`${data.batch_totals.with_east.east_selected_lines} שורות מזרח`}
-              tone="good"
+              value={fmtEastPrice(data.batch_totals.with_east.total, data.has_east_pricing)}
+              sub={
+                data.has_east_pricing
+                  ? `${data.batch_totals.with_east.east_selected_lines} שורות מזרח`
+                  : "לא הועלה מחירון סין"
+              }
+              tone={data.has_east_pricing ? "good" : "warn"}
             />
           </div>
 
+          {data.project_totals && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 shrink-0">
+              <Kpi
+                label="שורות BOM (פרויקט)"
+                value={String(data.project_totals.bom_lines)}
+                sub={`${data.project_totals.has_solution} עם פתרון`}
+              />
+              <Kpi
+                label="ציון איכות ממוצע"
+                value={
+                  data.project_totals.bom_quality_score != null
+                    ? String(Math.round(data.project_totals.bom_quality_score))
+                    : "—"
+                }
+                tone={
+                  qualityScoreTone(data.project_totals.bom_quality_score ?? 0) === "good"
+                    ? "good"
+                    : qualityScoreTone(data.project_totals.bom_quality_score ?? 0) === "warn"
+                      ? "warn"
+                      : "brand"
+                }
+              />
+              <Kpi
+                label="אין פתרון"
+                value={String(data.project_totals.no_solution)}
+                tone={data.project_totals.no_solution > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="דורש אישור"
+                value={String(data.project_totals.needs_approval)}
+                tone={data.project_totals.needs_approval > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="אין מלאי"
+                value={String(data.project_totals.no_stock)}
+                tone={data.project_totals.no_stock > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="שגיאות איכות"
+                value={String(data.project_totals.bom_error_count)}
+                tone={data.project_totals.bom_error_count > 0 ? "warn" : "default"}
+              />
+              <Kpi
+                label="כרטיסים ללא BOM"
+                value={String(data.project_totals.cards_missing_bom)}
+                tone={data.project_totals.cards_missing_bom > 0 ? "warn" : "default"}
+              />
+            </div>
+          )}
+
           <PricingComparisonCards
             comparison={data.batch_totals}
-            activeModeEast
+            activeModeEast={data.has_east_pricing && data.cards.some((c) => c.include_east_pricing)}
+            eastPricingAvailable={data.has_east_pricing}
             summary={null}
           />
 
@@ -276,7 +367,19 @@ export function ProjectProductionSummaryPanel({
                       tone={profitCalc.batchProfit >= 0 ? "good" : "warn"}
                     />
                     <Kpi label="הכנסה למנה" value={fmtPrice(profitCalc.batchRevenue)} />
-                    <Kpi label="עלות רכש משולב" value={fmtPrice(profitCalc.batchCostEast)} tone="good" />
+                    {data.has_east_pricing ? (
+                      <Kpi
+                        label="עלות רכש משולב"
+                        value={fmtPrice(profitCalc.batchCostEast)}
+                        tone="good"
+                      />
+                    ) : (
+                      <Kpi
+                        label="עלות רכש רשמי"
+                        value={fmtPrice(profitCalc.batchCostEast)}
+                        tone="brand"
+                      />
+                    )}
                   </>
                 ) : null}
                 {profitCalc.savingsVsOfficial != null && profitCalc.savingsVsOfficial > 0 ? (
@@ -307,6 +410,10 @@ export function ProjectProductionSummaryPanel({
                     <th className="text-start px-3 py-2 font-medium">כרטיס</th>
                     <th className="text-start px-2 py-2 font-medium">מנה</th>
                     <th className="text-end px-2 py-2 font-medium">כמות</th>
+                    <th className="text-end px-2 py-2 font-medium">שורות</th>
+                    <th className="text-end px-2 py-2 font-medium">איכות</th>
+                    <th className="text-end px-2 py-2 font-medium">ללא מחיר</th>
+                    <th className="text-end px-2 py-2 font-medium">אישור</th>
                     <th className="text-end px-2 py-2 font-medium">רשמי/יח׳</th>
                     <th className="text-end px-2 py-2 font-medium">משולב/יח׳</th>
                     <th className="text-end px-2 py-2 font-medium">סה״כ רשמי</th>
@@ -337,10 +444,12 @@ export function ProjectProductionSummaryPanel({
 }
 
 function CardRow({ card, projectId }: { card: CardProductionSummary; projectId: number }) {
-  const saving = card.savings_amount > 0;
+  const saving = card.has_east_pricing && card.savings_amount > 0;
   const batchLabel =
     card.batch_label ||
     (card.bom_version_id != null ? `מנה #${card.bom_version_id}` : "—");
+  const qTone =
+    card.bom_quality_score != null ? qualityScoreTone(card.bom_quality_score) : "muted";
 
   return (
     <tr className={clsx("border-b border-slate-50", !card.has_bom && "opacity-60")}>
@@ -354,19 +463,44 @@ function CardRow({ card, projectId }: { card: CardProductionSummary; projectId: 
       <td className="px-2 py-2 text-end tabular-nums">
         {card.has_bom ? card.build_quantity.toLocaleString() : "—"}
       </td>
+      <td className="px-2 py-2 text-end tabular-nums text-slate-600">
+        {card.has_bom ? card.bom_items_count : "—"}
+      </td>
+      <td
+        className={clsx(
+          "px-2 py-2 text-end tabular-nums font-medium",
+          qTone === "good" ? "text-green-700" : qTone === "warn" ? "text-amber-700" : "text-red-700",
+        )}
+      >
+        {card.bom_quality_score != null ? Math.round(card.bom_quality_score) : "—"}
+      </td>
+      <td className="px-2 py-2 text-end tabular-nums text-red-700">
+        {card.has_bom && card.no_solution > 0 ? card.no_solution : "—"}
+      </td>
+      <td className="px-2 py-2 text-end tabular-nums text-amber-700">
+        {card.has_bom && card.needs_approval > 0 ? card.needs_approval : "—"}
+      </td>
       <td className="px-2 py-2 text-end tabular-nums">{fmtPrice(card.official_unit_cost)}</td>
-      <td className="px-2 py-2 text-end tabular-nums text-emerald-800">{fmtPrice(card.east_unit_cost)}</td>
+      <td className="px-2 py-2 text-end tabular-nums text-slate-500">
+        {fmtEastPrice(card.east_unit_cost, card.has_east_pricing)}
+      </td>
       <td className="px-2 py-2 text-end tabular-nums">{fmtPrice(card.official_batch_total)}</td>
-      <td className="px-2 py-2 text-end tabular-nums text-emerald-800">{fmtPrice(card.east_batch_total)}</td>
+      <td className="px-2 py-2 text-end tabular-nums text-slate-500">
+        {fmtEastPrice(card.east_batch_total, card.has_east_pricing)}
+      </td>
       <td className="px-2 py-2 text-end tabular-nums">
         {card.has_bom ? (
-          <span className={clsx("inline-flex items-center gap-0.5", saving ? "text-green-700" : "text-amber-700")}>
-            {saving ? <TrendingDown className="w-3 h-3" /> : card.savings_amount < 0 ? <TrendingUp className="w-3 h-3" /> : null}
-            {fmtPrice(Math.abs(card.savings_amount))}
-            {card.savings_percent != null && card.savings_amount !== 0 ? (
-              <span className="text-[9px]">{saving ? "−" : "+"}{Math.abs(card.savings_percent).toFixed(1)}%</span>
-            ) : null}
-          </span>
+          card.has_east_pricing ? (
+            <span className={clsx("inline-flex items-center gap-0.5", saving ? "text-green-700" : "text-amber-700")}>
+              {saving ? <TrendingDown className="w-3 h-3" /> : card.savings_amount < 0 ? <TrendingUp className="w-3 h-3" /> : null}
+              {fmtPrice(Math.abs(card.savings_amount))}
+              {card.savings_percent != null && card.savings_amount !== 0 ? (
+                <span className="text-[9px]">{saving ? "−" : "+"}{Math.abs(card.savings_percent).toFixed(1)}%</span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="text-slate-500">ללא מחיר סין</span>
+          )
         ) : (
           "—"
         )}

@@ -39,24 +39,26 @@ export function PricingComparisonCards({
   activeModeEast,
   buildQuantity = null,
   summary = null,
+  eastPricingAvailable = true,
 }: {
   comparison: PricingComparison | null;
   activeModeEast: boolean;
   buildQuantity?: number | null;
   summary?: WorkbenchSummary | null;
+  eastPricingAvailable?: boolean;
 }) {
   if (!comparison) return null;
 
   const { official_only: off, with_east: east, savings } = comparison;
-  const isSaving = savings.is_saving && savings.amount > 0;
-  const isGap = savings.amount < 0;
+  const isSaving = eastPricingAvailable && savings.is_saving && savings.amount > 0;
+  const isGap = eastPricingAvailable && savings.amount < 0;
 
   function unitLabel(total: number) {
     if (buildQuantity == null || buildQuantity <= 0 || total <= 0) return null;
     return fmtPrice(total / buildQuantity);
   }
 
-  const activeTotal = activeModeEast ? east.total : off.total;
+  const activeTotal = activeModeEast && eastPricingAvailable ? east.total : off.total;
   const activeUnit = unitLabel(activeTotal);
   const excludedNoSolution = summary?.no_solution ?? 0;
   const excludedDnp = summary?.dnp ?? 0;
@@ -71,6 +73,7 @@ export function PricingComparisonCards({
     active,
     accent,
     chips,
+    unavailable = false,
   }: {
     title: string;
     sub: string;
@@ -78,13 +81,16 @@ export function PricingComparisonCards({
     active: boolean;
     accent: "brand" | "amber";
     chips: ReactNode;
+    unavailable?: boolean;
   }) {
     const unit = unitLabel(total);
     return (
       <div
         className={clsx(
           cardBase,
-          active
+          unavailable
+            ? "border-slate-200 bg-slate-50/70 opacity-95"
+            : active
             ? accent === "brand"
               ? "border-brand/40 bg-brand/5 ring-1 ring-brand/15"
               : "border-amber-400/50 bg-amber-50/60 ring-1 ring-amber-200/80"
@@ -96,7 +102,7 @@ export function PricingComparisonCards({
             <p className="text-[10.5px] font-bold text-navy leading-tight truncate">{title}</p>
             <p className="text-[8px] text-slate-500 truncate">{sub}</p>
           </div>
-          {active && (
+          {active && !unavailable && (
             <span
               className={clsx(
                 "shrink-0 text-[7.5px] px-1 py-px rounded font-medium text-white",
@@ -107,7 +113,9 @@ export function PricingComparisonCards({
             </span>
           )}
         </div>
-        {active && unit ? (
+        {unavailable ? (
+          <p className="mt-1 text-[13px] font-semibold text-slate-500">ללא מחיר סין</p>
+        ) : active && unit ? (
           <div className="mt-1 flex items-baseline gap-2 flex-wrap">
             <p className="text-[18px] font-bold tabular-nums text-emerald-800 leading-none">{unit}</p>
             <span className="text-[8px] text-emerald-700/90">ליחידה</span>
@@ -154,22 +162,29 @@ export function PricingComparisonCards({
         />
         <ScenarioCard
           title="משולב עם מזרח"
-          sub="Link / ספקי מזרח"
+          sub={eastPricingAvailable ? "Link / ספקי מזרח" : "לא הועלה מחירון סין"}
           total={east.total}
-          active={activeModeEast}
+          active={activeModeEast && eastPricingAvailable}
           accent="amber"
+          unavailable={!eastPricingAvailable}
           chips={
-            <>
-              <MiniChip label="מתומחר" value={east.priced_lines} tone="blue" />
-              <MiniChip label="מזרח" value={east.east_selected_lines} tone="amber" />
-              <MiniChip label="דורש אישור" value={east.needs_approval} tone="amber" />
-            </>
+            eastPricingAvailable ? (
+              <>
+                <MiniChip label="מתומחר" value={east.priced_lines} tone="blue" />
+                <MiniChip label="מזרח" value={east.east_selected_lines} tone="amber" />
+                <MiniChip label="דורש אישור" value={east.needs_approval} tone="amber" />
+              </>
+            ) : (
+              <MiniChip label="סטטוס" value="ללא מחיר סין" tone="amber" />
+            )
           }
         />
         <div
           className={clsx(
             cardBase,
-            isSaving
+            !eastPricingAvailable
+              ? "border-slate-200 bg-slate-50/50"
+              : isSaving
               ? "border-green-200 bg-green-50/50"
               : isGap
                 ? "border-amber-200 bg-amber-50/30"
@@ -177,40 +192,54 @@ export function PricingComparisonCards({
           )}
         >
           <p className="text-[10.5px] font-bold text-navy leading-tight">
-            {isSaving ? "חיסכון" : isGap ? "פער" : "השוואה"}
+            {!eastPricingAvailable
+              ? "השוואה"
+              : isSaving
+                ? "חיסכון"
+                : isGap
+                  ? "פער"
+                  : "השוואה"}
           </p>
           <div className="flex items-baseline gap-1.5 mt-1">
-            {isSaving ? (
-              <TrendingDown className="w-3.5 h-3.5 text-green-600 shrink-0" />
-            ) : isGap ? (
-              <TrendingUp className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            ) : null}
-            <p
-              className={clsx(
-                "text-[15px] font-bold tabular-nums leading-none",
-                isSaving ? "text-green-700" : isGap ? "text-amber-700" : "text-slate-700",
-              )}
-            >
-              {fmtPrice(Math.abs(savings.amount))}
-            </p>
-            {savings.percent != null && savings.amount !== 0 && (
-              <span
-                className={clsx(
-                  "text-[10px] font-semibold tabular-nums",
-                  isSaving ? "text-green-700" : "text-amber-700",
+            {!eastPricingAvailable ? (
+              <p className="text-[12px] font-medium text-slate-500">ללא מחיר סין להשוואה</p>
+            ) : (
+              <>
+                {isSaving ? (
+                  <TrendingDown className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                ) : isGap ? (
+                  <TrendingUp className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                ) : null}
+                <p
+                  className={clsx(
+                    "text-[15px] font-bold tabular-nums leading-none",
+                    isSaving ? "text-green-700" : isGap ? "text-amber-700" : "text-slate-700",
+                  )}
+                >
+                  {fmtPrice(Math.abs(savings.amount))}
+                </p>
+                {savings.percent != null && savings.amount !== 0 && (
+                  <span
+                    className={clsx(
+                      "text-[10px] font-semibold tabular-nums",
+                      isSaving ? "text-green-700" : "text-amber-700",
+                    )}
+                  >
+                    {isSaving ? "−" : "+"}
+                    {Math.abs(savings.percent).toFixed(1)}%
+                  </span>
                 )}
-              >
-                {isSaving ? "−" : "+"}
-                {Math.abs(savings.percent).toFixed(1)}%
-              </span>
+              </>
             )}
           </div>
-          <div className="flex flex-wrap gap-1 mt-1">
-            <MiniChip label="מזרח" value={east.east_selected_lines} tone="amber" />
-            <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] text-amber-800">
-              <Lock className="w-2.5 h-2.5" /> פנימי
-            </span>
-          </div>
+          {eastPricingAvailable ? (
+            <div className="flex flex-wrap gap-1 mt-1">
+              <MiniChip label="מזרח" value={east.east_selected_lines} tone="amber" />
+              <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[8px] text-amber-800">
+                <Lock className="w-2.5 h-2.5" /> פנימי
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
 

@@ -57,7 +57,19 @@ class OfficialPricingFetchResponse(BaseModel):
     priced_count: int
     missing_count: int
     error_count: int
+    retry_attempted: int = 0
+    retry_recovered: int = 0
     is_mock: bool
+
+
+class OfficialPricingFetchProgress(BaseModel):
+    running: bool
+    completed_results: int
+    total_expected: int
+    priced_count: int
+    missing_count: int
+    error_count: int
+    suppliers: list[str] = Field(default_factory=list)
 
 
 class SupplierResultCell(BaseModel):
@@ -195,6 +207,7 @@ class WorkbenchResultsResponse(BaseModel):
     summary: WorkbenchSummary
     lines: list[WorkbenchLineResult]
     include_east_pricing: bool = False
+    has_east_pricing: bool = False
     east_quotes: list[dict] = Field(default_factory=list)
     pricing_comparison: PricingComparison | None = None
 
@@ -208,14 +221,37 @@ class CardProductionSummary(BaseModel):
     build_quantity: int = 0
     bom_items_count: int = 0
     include_east_pricing: bool = False
+    has_east_pricing: bool = False
     has_bom: bool = False
     pricing_comparison: PricingComparison | None = None
     official_unit_cost: float | None = None
     east_unit_cost: float | None = None
     official_batch_total: float = 0
-    east_batch_total: float = 0
+    east_batch_total: float | None = None
     savings_amount: float = 0
     savings_percent: float | None = None
+    bom_quality_score: float | None = None
+    bom_error_count: int = 0
+    bom_needs_review_count: int = 0
+    priced_lines: int = 0
+    needs_approval: int = 0
+    no_solution: int = 0
+    no_stock: int = 0
+    has_solution: int = 0
+    batch_selection: str = "none"
+
+
+class ProjectRollupTotals(BaseModel):
+    bom_lines: int = 0
+    bom_quality_score: float | None = None
+    bom_error_count: int = 0
+    bom_needs_review_count: int = 0
+    priced_lines: int = 0
+    needs_approval: int = 0
+    no_solution: int = 0
+    no_stock: int = 0
+    has_solution: int = 0
+    cards_missing_bom: int = 0
 
 
 class ProjectProductionSummaryResponse(BaseModel):
@@ -224,11 +260,13 @@ class ProjectProductionSummaryResponse(BaseModel):
     project_code: str
     card_count: int
     cards_with_bom: int
+    has_east_pricing: bool = False
     product_unit_official: float | None = None
     product_unit_east: float | None = None
     product_unit_savings: float | None = None
     product_unit_savings_percent: float | None = None
     batch_totals: PricingComparison
+    project_totals: ProjectRollupTotals = Field(default_factory=ProjectRollupTotals)
     cards: list[CardProductionSummary] = Field(default_factory=list)
 
 

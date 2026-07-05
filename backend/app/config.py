@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     ti_client_secret: str = ""
     supplier_api_timeout_seconds: int = 20
     supplier_api_max_retries: int = 2
+    # Pause between bulk-fetch retries (sequential re-fetch of failed lines).
+    supplier_fetch_retry_delay_seconds: float = 1.0
     supplier_api_mock: bool = False
     supplier_api_mock_allow_export: bool = False
 

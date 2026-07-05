@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, Literal
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -167,6 +170,133 @@ def _save_result(
     return row
 
 
+FetchOutcome = Literal["priced", "missing", "error"]
+
+
+@dataclass(frozen=True)
+class _LineFetchJob:
+    bl: BomLine
+    supplier: str
+    mpn: str
+    req_qty: float
+
+
+def _fetch_line_supplier(
+    db: Session,
+    *,
+    query_id: int,
+    bl: BomLine,
+    supplier: str,
+    mpn: str,
+    req_qty: float,
+    client: Any,
+) -> FetchOutcome:
+    """Query one supplier for one BOM line and persist the result."""
+    try:
+        result = client.search_by_mpn(mpn or "", float(req_qty or 0))
+        _save_result(
+            db,
+            query_id=query_id,
+            bom_line_id=bl.id,
+            supplier=supplier,
+            original_mpn=mpn,
+            required_qty=req_qty,
+            result=result,
+        )
+        if result.match_status == "error":
+            return "error"
+        if (
+            result.unit_price_for_required_qty is not None
+            and result.match_status in ("matched", "possible_match")
+        ):
+            return "priced"
+        return "missing"
+    except SupplierApiError as exc:
+        _save_result(
+            db,
+            query_id=query_id,
+            bom_line_id=bl.id,
+            supplier=supplier,
+            original_mpn=mpn,
+            required_qty=req_qty,
+            result=SupplierPriceResult(
+                supplier=supplier,
+                mpn=mpn or "",
+                match_status="error",
+                match_reason=exc.message,
+            ),
+        )
+        return "error"
+
+
+def _commit_fetch_progress(db: Session, *refresh: object) -> None:
+    """Commit incremental fetch results so other requests can read them."""
+    db.commit()
+    for obj in refresh:
+        db.refresh(obj)
+
+
+def get_fetch_progress(
+    db: Session,
+    *,
+    project_id: int,
+    bom_version_id: int,
+) -> dict:
+    """Live progress for a running bulk official-pricing fetch."""
+    running = list(
+        db.scalars(
+            select(OfficialSupplierQuery)
+            .where(
+                OfficialSupplierQuery.project_id == project_id,
+                OfficialSupplierQuery.bom_version_id == bom_version_id,
+                OfficialSupplierQuery.status == "running",
+            )
+            .order_by(OfficialSupplierQuery.started_at.desc())
+        )
+    )
+    if not running:
+        return {
+            "running": False,
+            "completed_results": 0,
+            "total_expected": 0,
+            "priced_count": 0,
+            "missing_count": 0,
+            "error_count": 0,
+            "suppliers": [],
+        }
+
+    query_ids = [q.id for q in running]
+    total_expected = sum(q.total_lines for q in running)
+    results = list(
+        db.scalars(
+            select(OfficialSupplierPriceResult).where(
+                OfficialSupplierPriceResult.query_id.in_(query_ids)
+            )
+        )
+    )
+    priced = missing = errors = 0
+    for row in results:
+        if row.match_status == "error":
+            errors += 1
+        elif row.unit_price is not None and row.match_status in (
+            "matched",
+            "possible_match",
+        ):
+            priced += 1
+        else:
+            missing += 1
+
+    return {
+        "running": True,
+        "completed_results": len(results),
+        "total_expected": total_expected,
+        "priced_count": priced,
+        "missing_count": missing,
+        "error_count": errors,
+        "suppliers": [q.supplier for q in running],
+    }
+
+
 def fetch_official_pricing(
     db: Session,
     *,
@@ -253,12 +383,14 @@ def fetch_official_pricing(
         ),
         commit=False,
     )
+    db.commit()
 
     query_ids: list[int] = []
     priced_count = 0
     missing_count = 0
     error_count = 0
     is_mock = settings.supplier_api_mock
+    failed_jobs: list[_LineFetchJob] = []
 
     for supplier in fetch_suppliers:
         query = OfficialSupplierQuery(
@@ -273,6 +405,7 @@ def fetch_official_pricing(
         db.add(query)
         db.flush()
         query_ids.append(query.id)
+        _commit_fetch_progress(db, query)
 
         matched = missing = errors = 0
         client = _client_for_supplier(supplier, settings)
@@ -286,57 +419,98 @@ def fetch_official_pricing(
                     )
                 ov = overrides.get(bl.id)
                 mpn = _search_mpn_for_line(bl, ov)
-                try:
-                    result = client.search_by_mpn(mpn or "", float(req_qty or 0))
-                    _save_result(
-                        db,
-                        query_id=query.id,
-                        bom_line_id=bl.id,
-                        supplier=supplier,
-                        original_mpn=mpn,
-                        required_qty=float(req_qty or 0),
-                        result=result,
-                    )
-                    if result.match_status == "error":
-                        errors += 1
-                        error_count += 1
-                    elif result.unit_price_for_required_qty is not None and result.match_status in (
-                        "matched",
-                        "possible_match",
-                    ):
-                        matched += 1
-                        priced_count += 1
-                    else:
-                        missing += 1
-                        missing_count += 1
-                except SupplierApiError as exc:
-                    _save_result(
-                        db,
-                        query_id=query.id,
-                        bom_line_id=bl.id,
-                        supplier=supplier,
-                        original_mpn=mpn,
-                        required_qty=float(req_qty or 0),
-                        result=SupplierPriceResult(
-                            supplier=supplier,
-                            mpn=mpn or "",
-                            match_status="error",
-                            match_reason=exc.message,
-                        ),
-                    )
+                req_f = float(req_qty or 0)
+                outcome = _fetch_line_supplier(
+                    db,
+                    query_id=query.id,
+                    bl=bl,
+                    supplier=supplier,
+                    mpn=mpn,
+                    req_qty=req_f,
+                    client=client,
+                )
+                if outcome == "error":
                     errors += 1
                     error_count += 1
+                    failed_jobs.append(
+                        _LineFetchJob(
+                            bl=bl,
+                            supplier=supplier,
+                            mpn=mpn,
+                            req_qty=req_f,
+                        )
+                    )
+                elif outcome == "priced":
+                    matched += 1
+                    priced_count += 1
+                else:
+                    missing += 1
+                    missing_count += 1
+                _commit_fetch_progress(db, query)
 
             query.status = "completed"
             query.matched_lines = matched
             query.missing_lines = missing
             query.completed_at = datetime.now(timezone.utc)
+            _commit_fetch_progress(db, query)
         except SupplierApiError as exc:
             query.status = "failed"
             query.error_message = exc.message
             query.completed_at = datetime.now(timezone.utc)
             db.commit()
             raise
+
+    retry_attempted = 0
+    retry_recovered = 0
+    if failed_jobs and not is_mock:
+        retry_delay = settings.supplier_fetch_retry_delay_seconds
+        retry_queries: dict[str, OfficialSupplierQuery] = {}
+        for supplier in {job.supplier for job in failed_jobs}:
+            retry_count = sum(1 for job in failed_jobs if job.supplier == supplier)
+            retry_query = OfficialSupplierQuery(
+                project_id=project_id,
+                bom_version_id=bom_version_id,
+                supplier=supplier,
+                status="running",
+                started_by_user_id=user_id,
+                total_lines=retry_count,
+                is_mock=is_mock,
+            )
+            db.add(retry_query)
+            db.flush()
+            retry_queries[supplier] = retry_query
+            query_ids.append(retry_query.id)
+        _commit_fetch_progress(db, *retry_queries.values())
+
+        for job in failed_jobs:
+            time.sleep(retry_delay)
+            retry_attempted += 1
+            client = _client_for_supplier(job.supplier, settings)
+            outcome = _fetch_line_supplier(
+                db,
+                query_id=retry_queries[job.supplier].id,
+                bl=job.bl,
+                supplier=job.supplier,
+                mpn=job.mpn,
+                req_qty=job.req_qty,
+                client=client,
+            )
+            retry_query = retry_queries[job.supplier]
+            if outcome != "error":
+                retry_recovered += 1
+                error_count -= 1
+                if outcome == "priced":
+                    priced_count += 1
+                    retry_query.matched_lines = (retry_query.matched_lines or 0) + 1
+                else:
+                    missing_count += 1
+                    retry_query.missing_lines = (retry_query.missing_lines or 0) + 1
+            _commit_fetch_progress(db, retry_query)
+
+        for retry_query in retry_queries.values():
+            retry_query.status = "completed"
+            retry_query.completed_at = datetime.now(timezone.utc)
+        _commit_fetch_progress(db, *retry_queries.values())
 
     log_activity(
         db,
@@ -348,6 +522,11 @@ def fetch_official_pricing(
         change_summary=(
             f"Official pricing fetch completed: priced={priced_count}, "
             f"missing={missing_count}, errors={error_count}"
+            + (
+                f", retry_recovered={retry_recovered}/{retry_attempted}"
+                if retry_attempted
+                else ""
+            )
         ),
         commit=False,
     )
@@ -359,6 +538,8 @@ def fetch_official_pricing(
         "priced_count": priced_count,
         "missing_count": missing_count,
         "error_count": error_count,
+        "retry_attempted": retry_attempted,
+        "retry_recovered": retry_recovered,
         "is_mock": is_mock,
     }
 

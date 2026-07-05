@@ -27,6 +27,7 @@ from app.schemas.official_pricing import (
     OfficialPriceLineRead,
     OfficialPriceSnapshotRead,
     OfficialPricingFetchRequest,
+    OfficialPricingFetchProgress,
     OfficialPricingFetchResponse,
     OfficialPricingLineResult,
     OfficialPricingResultsResponse,
@@ -46,6 +47,7 @@ from app.schemas.official_pricing import (
     WorkbenchExportRequest,
     PricingComparison,
     ProjectProductionSummaryResponse,
+    ProjectRollupTotals,
     CardProductionSummary,
     WorkbenchLineResult,
     WorkbenchResultsResponse,
@@ -63,6 +65,7 @@ from app.services.suppliers.component_lookup import (
 from app.services.suppliers.official_pricing import (
     create_official_snapshot,
     fetch_official_pricing,
+    get_fetch_progress,
     get_official_results,
     supplier_config_status,
     test_supplier_search,
@@ -214,6 +217,21 @@ def post_component_lookup_add_to_project(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/fetch-progress", response_model=OfficialPricingFetchProgress)
+def get_fetch_progress_endpoint(
+    project_id: int = Query(...),
+    bom_version_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> OfficialPricingFetchProgress:
+    return OfficialPricingFetchProgress(
+        **get_fetch_progress(
+            db,
+            project_id=project_id,
+            bom_version_id=bom_version_id,
+        )
+    )
+
+
 @router.post("/fetch", response_model=OfficialPricingFetchResponse)
 def post_fetch_official_pricing(
     payload: OfficialPricingFetchRequest,
@@ -306,11 +324,13 @@ def project_production_summary(
         project_code=data["project_code"],
         card_count=data["card_count"],
         cards_with_bom=data["cards_with_bom"],
+        has_east_pricing=data.get("has_east_pricing", False),
         product_unit_official=data.get("product_unit_official"),
         product_unit_east=data.get("product_unit_east"),
         product_unit_savings=data.get("product_unit_savings"),
         product_unit_savings_percent=data.get("product_unit_savings_percent"),
         batch_totals=PricingComparison(**data["batch_totals"]),
+        project_totals=ProjectRollupTotals(**(data.get("project_totals") or {})),
         cards=cards,
     )
 
@@ -335,6 +355,7 @@ def get_workbench(
         summary=WorkbenchSummary(**data["summary"]),
         lines=[WorkbenchLineResult(**ln) for ln in data["lines"]],
         include_east_pricing=data.get("include_east_pricing", False),
+        has_east_pricing=data.get("has_east_pricing", False),
         east_quotes=data.get("east_quotes", []),
         pricing_comparison=(
             PricingComparison(**data["pricing_comparison"])
