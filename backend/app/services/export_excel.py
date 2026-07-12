@@ -107,6 +107,11 @@ INTERNAL_REPORT_STYLES: dict[str, dict[str, str]] = {
         "title_he": "דוח רכש ספקים פנימי",
         "color": "C65911",
     },
+    "supplier_workbench": {
+        "title_en": "GLINTECH SUPPLIER PRICING WORKBENCH",
+        "title_he": "מחירון BOM מספקים",
+        "color": "7030A0",
+    },
     "summary": {
         "title_en": "GLINTECH INTERNAL SUMMARY",
         "title_he": "סיכום פנימי",
@@ -118,6 +123,8 @@ _INTERNAL_REPORT_TYPE_ALIASES: dict[str, str] = {
     "quality": "bom_quality",
     "pricing": "pricing_snapshot",
     "comparison": "pricing_comparison",
+    "workbench": "supplier_workbench",
+    "supplier_workbench": "supplier_workbench",
     "purchase": "supplier_purchase",
 }
 
@@ -678,6 +685,37 @@ def _clear_bom_row_values(ws, start: int, end: int) -> None:
             ws.cell(row=row, column=col).value = None
 
 
+def _finalize_customer_summary_formulas(ws, last_data_row: int) -> None:
+    """Refresh template summary formulas for the actual BOM row span."""
+    start = TEMPLATE_DATA_START_ROW
+    end = max(last_data_row, start)
+    ext_col = get_column_letter(_COL_OFFICIAL_EXTENDED)
+    sum_expr = f"SUM({ext_col}{start}:{ext_col}{end})"
+    ws["B9"].value = f'=IF({sum_expr}=0,"Pending",{sum_expr})'
+    ws["B9"].number_format = USD_CURRENCY_FMT
+    ws["B13"].value = (
+        f'=IF(B9="Pending","Pending",IFERROR(B9/G9,0)+IFERROR(B10,0)+IFERROR(B11,0))'
+    )
+    ws["B13"].number_format = USD_CURRENCY_FMT
+    ws["D13"].value = (
+        f'=IF(B9="Pending","Pending",IFERROR(B9,0)+IFERROR(B10*G9,0)+'
+        f'IFERROR(B11*G9,0)+IFERROR(D10,0)+IFERROR(E10,0))'
+    )
+    ws["D13"].number_format = USD_CURRENCY_FMT
+    for addr in ("B10", "E10", "B11", "E11", "D10"):
+        if ws[addr].number_format in (None, "General"):
+            ws[addr].number_format = USD_CURRENCY_FMT
+
+
+def _trim_customer_template_blank_rows(ws, last_data_row: int) -> None:
+    """Remove unused template sample rows below the exported BOM block."""
+    if last_data_row >= TEMPLATE_DATA_DEFAULT_END_ROW:
+        return
+    remove_count = TEMPLATE_DATA_DEFAULT_END_ROW - last_data_row
+    if remove_count > 0:
+        ws.delete_rows(last_data_row + 1, remove_count)
+
+
 def customer_bom_review_filename(project_code: str, version_name: str) -> str:
     return f"Customer_BOM_Review_{_safe_part(project_code)}_{_safe_part(version_name)}.xlsx"
 
@@ -745,6 +783,41 @@ def _resolve_official_row(line: BomLine) -> tuple[str, float | None]:
     return explicit, None
 
 
+def _resolve_official_row_from_workbench(wb_line: dict) -> tuple[str, float | None]:
+    """Customer-safe fallback from live workbench selection (official suppliers only)."""
+    if wb_line.get("dnp"):
+        return "DNP", None
+    source_type = (wb_line.get("selected_source_type") or "").strip().lower()
+    if source_type in {"east_quote", "east"} or wb_line.get("source_is_internal"):
+        return "TBD", None
+    source = (wb_line.get("source") or "TBD").strip()
+    if source in {"", "—", "TBD", "DNP"}:
+        return "TBD", None
+    if _is_forbidden_official_source(source):
+        return "TBD", None
+    unit = wb_line.get("unit_price")
+    if unit is None:
+        return source, None
+    return source, float(unit)
+
+
+def _workbench_lines_for_customer_export(
+    db: Session,
+    *,
+    project_id: int,
+    bom_version_id: int,
+) -> dict[int, dict]:
+    from app.services.suppliers.workbench import get_workbench_results
+
+    data = get_workbench_results(
+        db,
+        project_id=project_id,
+        bom_version_id=bom_version_id,
+        include_east_override=False,
+    )
+    return {ln["bom_line_id"]: ln for ln in data["lines"]}
+
+
 def _validate_official_source_values(values: list[str]) -> None:
     for value in values:
         if _is_forbidden_official_source(value):
@@ -776,6 +849,12 @@ def build_customer_bom_review_xlsx(
     export_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     card = db.get(ProjectCard, version.card_id) if version.card_id else None
     build_qty = effective_build_quantity(version, card=card, project=project)
+    board_name = (
+        version.board_name
+        or (card.board_name if card else None)
+        or (card.name if card else None)
+        or "—"
+    )
 
     wb, ws = _load_customer_template_sheet()
     template_extended_formula = _snapshot_template_extended_formula(ws)
@@ -796,30 +875,43 @@ def build_customer_bom_review_xlsx(
         version_label=version_label,
         revision=version.revision_code or "—",
         doc_number=version.source_doc_number or "—",
-        board_name=version.board_name or "—",
+        board_name=board_name,
         build_qty=build_qty,
         export_date=export_date,
     )
 
     last_data_row = TEMPLATE_DATA_START_ROW + len(lines) - 1 if lines else TEMPLATE_DATA_START_ROW
-    data_end_row = max(last_data_row, TEMPLATE_DATA_DEFAULT_END_ROW)
+    clear_end_row = max(last_data_row, TEMPLATE_DATA_DEFAULT_END_ROW)
 
     if last_data_row > TEMPLATE_DATA_DEFAULT_END_ROW:
         extra = last_data_row - TEMPLATE_DATA_DEFAULT_END_ROW
         ws.insert_rows(TEMPLATE_DATA_DEFAULT_END_ROW + 1, extra)
-        data_end_row = last_data_row
         for offset in range(extra):
             new_row = TEMPLATE_DATA_DEFAULT_END_ROW + 1 + offset
             _apply_row_styles(ws, new_row, style_sources)
             if template_extended_formula:
                 _apply_template_extended_formula(ws, new_row, template_extended_formula)
 
-    _clear_bom_row_values(ws, TEMPLATE_DATA_START_ROW, data_end_row)
+    _clear_bom_row_values(ws, TEMPLATE_DATA_START_ROW, clear_end_row)
 
     official_snapshot = get_latest_exportable_snapshot(db, version.id)
     snapshot_by_line: dict[int, OfficialPriceLine] = {}
     if official_snapshot is not None:
         snapshot_by_line = snapshot_lines_by_bom_line(db, official_snapshot.id)
+
+    wb_lines_by_id: dict[int, dict] = {}
+    non_dnp_lines = [ln for ln in lines if not _is_dnp_line(ln)]
+    needs_workbench = official_snapshot is None or any(
+        ln.id not in snapshot_by_line
+        or _resolve_official_row_from_snapshot(ln, snapshot_by_line.get(ln.id))[1] is None
+        for ln in non_dnp_lines
+    )
+    if needs_workbench:
+        wb_lines_by_id = _workbench_lines_for_customer_export(
+            db,
+            project_id=project.id,
+            bom_version_id=version.id,
+        )
 
     written_sources: list[str] = []
 
@@ -838,7 +930,19 @@ def build_customer_bom_review_xlsx(
             if snap_line is not None:
                 official_source, unit_price = _resolve_official_row_from_snapshot(ln, snap_line)
             else:
-                official_source, unit_price = _resolve_official_row(ln)
+                official_source, unit_price = "TBD", None
+            if unit_price is None:
+                wb_line = wb_lines_by_id.get(ln.id)
+                if wb_line is not None:
+                    wb_source, wb_price = _resolve_official_row_from_workbench(wb_line)
+                    if wb_price is not None or (
+                        wb_source not in ("TBD", "DNP") and official_source == "TBD"
+                    ):
+                        official_source, unit_price = wb_source, wb_price
+            if unit_price is None and official_source == "TBD":
+                notes_source, notes_price = _resolve_official_row(ln)
+                if notes_price is not None:
+                    official_source, unit_price = notes_source, notes_price
             notes = ln.notes
 
         written_sources.append(official_source)
@@ -864,6 +968,10 @@ def build_customer_bom_review_xlsx(
         _apply_data_row_number_formats(ws, row, is_dnp=is_dnp)
 
     _validate_official_source_values(written_sources)
+
+    _finalize_customer_summary_formulas(ws, last_data_row)
+    _trim_customer_template_blank_rows(ws, last_data_row)
+    data_end_row = last_data_row
 
     last_col = get_column_letter(TEMPLATE_TABLE_COLS)
     ws.auto_filter.ref = (
@@ -1565,16 +1673,13 @@ def build_supplier_pricing_workbench_xlsx(
 
     version_label = version.version_name or version.version_label
     file_name = supplier_workbench_filename(project.code, version_label)
+    card = db.get(ProjectCard, version.card_id) if version.card_id else None
     data = get_workbench_results(
         db, project_id=project.id, bom_version_id=version.id
     )
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Supplier Pricing"
-    ws.sheet_view.rightToLeft = True
-
     headers = [
+        "Line",
         "MPN",
         "Manufacturer",
         "Description",
@@ -1600,13 +1705,11 @@ def build_supplier_pricing_workbench_xlsx(
         if any(f in h.lower() for f in forbidden):
             raise ValueError(f"Unsafe workbench export header '{h}'")
 
-    ws.append(headers)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-
+    data_rows = []
     for ln in data["lines"]:
-        ws.append(
+        data_rows.append(
             [
+                ln.get("line_no"),
                 ln.get("mpn"),
                 ln.get("manufacturer"),
                 ln.get("description"),
@@ -1622,7 +1725,31 @@ def build_supplier_pricing_workbench_xlsx(
             ]
         )
 
-    _autosize(ws)
+    wb, ws, tpl_ws = _create_internal_workbook("Supplier Pricing")
+    _render_internal_data_sheet(
+        ws,
+        report_type="supplier_workbench",
+        meta_rows=[
+            ("Project", project.name),
+            ("Project Code", project.code),
+            ("Card", card.name if card else "—"),
+            ("BOM Version", version_label),
+            (
+                "Generated At",
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            ),
+        ],
+        kpi_rows=[
+            ("Total Lines", data.get("summary", {}).get("total_lines")),
+            ("With Solution", data.get("summary", {}).get("has_solution")),
+            ("Priced Lines", data.get("summary", {}).get("priced_lines")),
+        ],
+        headers=headers,
+        data_rows=data_rows,
+        tpl_ws=tpl_ws,
+    )
+    _finalize_internal_workbook(wb)
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue(), file_name

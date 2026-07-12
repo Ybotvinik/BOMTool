@@ -4,6 +4,7 @@ from app.schemas.bom_version import BomVersionRead
 
 
 class BomVersionCatalogItem(BomVersionRead):
+    card_name: str | None = None
     total_lines: int = 0
     dnp_count: int = 0
     non_dnp_count: int = 0

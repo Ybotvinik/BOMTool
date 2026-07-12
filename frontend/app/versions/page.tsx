@@ -10,6 +10,7 @@ import {
   saveProjectId,
 } from "@/components/versions/BomVersionsPanel";
 import { apiGet } from "@/lib/api";
+import { useProjectBatchScope } from "@/lib/use-project-batch-scope";
 
 const VERSION_TABS = [
   { id: "versions", label: "גרסאות BOM" },
@@ -25,6 +26,7 @@ function VersionsInner() {
   const params = useSearchParams();
   const activeTab = (params.get("tab") as VersionTab) || "versions";
   const urlProjectId = params.get("project_id");
+  const urlCardId = params.get("card_id");
   const urlBaseId = params.get("base_version_id");
   const urlTargetId = params.get("target_version_id");
 
@@ -47,10 +49,24 @@ function VersionsInner() {
     });
   }, [urlProjectId]);
 
+  const scope = useProjectBatchScope(projectId, urlCardId, null);
+
+  useEffect(() => {
+    if (scope.loading || projectId == null || activeTab !== "changes") return;
+    if (!urlCardId && scope.cardId != null) {
+      const next = new URLSearchParams(params.toString());
+      next.set("project_id", String(projectId));
+      next.set("card_id", String(scope.cardId));
+      next.set("tab", "changes");
+      router.replace(`/versions?${next.toString()}`);
+    }
+  }, [scope.loading, scope.cardId, projectId, urlCardId, activeTab, params, router]);
+
   const syncUrl = useCallback(
     (patch: {
       tab?: VersionTab;
       projectId?: number;
+      cardId?: number | null;
       baseVersionId?: number | null;
       targetVersionId?: number | null;
     }) => {
@@ -63,30 +79,44 @@ function VersionsInner() {
       if (pid != null) next.set("project_id", String(pid));
       else next.delete("project_id");
 
+      const cid = patch.cardId !== undefined ? patch.cardId : scope.cardId;
+      if (cid != null) next.set("card_id", String(cid));
+      else next.delete("card_id");
+
       if (patch.baseVersionId != null) next.set("base_version_id", String(patch.baseVersionId));
+      else if (patch.baseVersionId === null) next.delete("base_version_id");
       if (patch.targetVersionId != null) next.set("target_version_id", String(patch.targetVersionId));
+      else if (patch.targetVersionId === null) next.delete("target_version_id");
 
       router.replace(`/versions?${next.toString()}`);
     },
-    [activeTab, params, projectId, router],
+    [activeTab, params, projectId, router, scope.cardId],
   );
 
   function handleProjectChange(id: number) {
     saveProjectId(id);
     setProjectId(id);
-    syncUrl({ projectId: id });
+    syncUrl({ projectId: id, cardId: null });
   }
 
-  function handleCompareWith(targetVersionId: number) {
+  function handleCardChange(cardId: number) {
+    syncUrl({ tab: "changes", cardId, baseVersionId: null, targetVersionId: null });
+  }
+
+  function handleCompareWith(targetVersionId: number, cardIdForVersion?: number | null) {
     saveProjectId(projectId!);
-    syncUrl({ tab: "changes", targetVersionId });
-    router.push(
-      `/versions?tab=changes&project_id=${projectId}&target_version_id=${targetVersionId}`,
-    );
+    const q = new URLSearchParams();
+    q.set("tab", "changes");
+    q.set("project_id", String(projectId));
+    if (cardIdForVersion != null) q.set("card_id", String(cardIdForVersion));
+    else if (scope.cardId != null) q.set("card_id", String(scope.cardId));
+    q.set("target_version_id", String(targetVersionId));
+    router.push(`/versions?${q.toString()}`);
   }
 
   const tabQuery: Record<string, string | number | null | undefined> = {
     project_id: projectId,
+    card_id: scope.cardId,
   };
   if (urlBaseId) tabQuery.base_version_id = urlBaseId;
   if (urlTargetId) tabQuery.target_version_id = urlTargetId;
@@ -116,6 +146,9 @@ function VersionsInner() {
           <BomComparePanel
             projectId={projectId}
             onProjectChange={handleProjectChange}
+            overview={scope.overview}
+            cardId={scope.cardId}
+            onCardChange={handleCardChange}
             initialBaseId={urlBaseId ? Number(urlBaseId) : null}
             initialTargetId={urlTargetId ? Number(urlTargetId) : null}
           />

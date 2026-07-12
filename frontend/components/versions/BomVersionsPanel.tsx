@@ -50,7 +50,7 @@ export function BomVersionsPanel({
 }: {
   projectId: number | null;
   onProjectChange: (id: number) => void;
-  onCompareWith: (targetVersionId: number) => void;
+  onCompareWith: (targetVersionId: number, cardId?: number | null) => void;
 }) {
   const { user } = useCurrentUser();
   const [projects, setProjects] = useState<ApiProject[]>([]);
@@ -179,7 +179,7 @@ export function BomVersionsPanel({
                 <div className="font-medium truncate">{catalog.customer_name ?? "—"}</div>
               </div>
               <div>
-                <div className="text-slate-500">גרסה פעילה</div>
+                <div className="text-slate-500">כרטיס ראשי</div>
                 <div className="font-medium truncate">
                   {activeVersion ? versionDisplayName(activeVersion) : "—"}
                 </div>
@@ -193,7 +193,7 @@ export function BomVersionsPanel({
                 <div className="font-medium">{fmtDate(catalog.last_uploaded_at)}</div>
               </div>
               <div>
-                <div className="text-slate-500">שורות בגרסה פעילה</div>
+                <div className="text-slate-500">שורות בכרטיס הראשי</div>
                 <div className="font-bold tabular-nums">{activeVersion?.total_lines ?? "—"}</div>
               </div>
             </div>
@@ -226,7 +226,7 @@ export function BomVersionsPanel({
                           <span className="text-[14px] font-bold text-navy">{label}</span>
                           {isActive && (
                             <Badge className="bg-brand-soft text-brand border-brand/30">
-                              <Star className="w-3 h-3 ml-1 fill-current" /> פעילה
+                              <Star className="w-3 h-3 ml-1 fill-current" /> כרטיס ראשי
                             </Badge>
                           )}
                           {v.is_active && !isActive && (
@@ -277,24 +277,24 @@ export function BomVersionsPanel({
                           onClick={() => activate(v.id)}
                           className="h-7 px-2 rounded-md border border-brand/30 text-[11px] text-brand bg-white hover:bg-brand-soft disabled:opacity-50"
                         >
-                          הפוך לפעילה
+                          הגדר ככרטיס ראשי
                         </button>
                       )}
                       <Link
-                        href={`/bom?project_id=${projectId}&version_id=${v.id}`}
+                        href={`/bom?project_id=${projectId}${v.card_id != null ? `&card_id=${v.card_id}` : ""}&version_id=${v.id}`}
                         className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50"
                       >
                         <Table2 className="w-3 h-3" /> פתח טבלת BOM
                       </Link>
                       <Link
-                        href={`/official-pricing?project_id=${projectId}&version_id=${v.id}`}
+                        href={`/official-pricing?project_id=${projectId}${v.card_id != null ? `&card_id=${v.card_id}` : ""}&version_id=${v.id}`}
                         className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50"
                       >
                         <DollarSign className="w-3 h-3" /> פתח מחירון ספקים
                       </Link>
                       <button
                         type="button"
-                        onClick={() => onCompareWith(v.id)}
+                        onClick={() => onCompareWith(v.id, v.card_id)}
                         className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50"
                       >
                         <GitCompare className="w-3 h-3" /> השווה מול גרסה אחרת
@@ -302,7 +302,7 @@ export function BomVersionsPanel({
                       <button
                         type="button"
                         disabled={busy || isActive}
-                        title={isActive ? "לא ניתן למחוק גרסה פעילה" : undefined}
+                        title={isActive ? "לא ניתן למחוק את הכרטיס הראשי" : undefined}
                         onClick={() => remove(v.id, label)}
                         className="inline-flex items-center gap-1 h-7 px-2 rounded-md border border-red-200 text-[11px] text-red-700 bg-white hover:bg-red-50 disabled:opacity-40"
                       >

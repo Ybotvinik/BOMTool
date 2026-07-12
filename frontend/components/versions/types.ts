@@ -1,6 +1,8 @@
 export type VersionCatalogItem = {
   id: number;
   project_id: number;
+  card_id: number | null;
+  card_name: string | null;
   version_label: string;
   version_name: string | null;
   revision_code: string | null;
@@ -99,8 +101,16 @@ export function versionDisplayName(v: {
   version_name?: string | null;
   batch_label?: string | null;
   version_label: string;
+  card_name?: string | null;
+  source_file_name?: string | null;
 }): string {
-  return v.version_name ?? v.batch_label ?? v.version_label;
+  const batch = v.version_name ?? v.batch_label ?? v.version_label;
+  if (v.card_name) return `${v.card_name} · ${batch}`;
+  if (v.source_file_name) {
+    const short = v.source_file_name.replace(/\.xlsx?$/i, "");
+    if (short && short !== batch) return `${short} · ${batch}`;
+  }
+  return batch;
 }
 
 export function fmtDate(iso: string | null | undefined): string {

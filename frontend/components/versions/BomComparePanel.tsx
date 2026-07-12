@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { GitCompare, Loader2, Search, Upload } from "lucide-react";
 import { Badge, Card } from "@/components/ui";
+import { CardBatchScopeBar } from "@/components/project/CardBatchScopeBar";
 import { apiGet } from "@/lib/api";
+import type { ProjectOverviewContext } from "@/lib/project-overview";
 import {
   COMPARE_FILTERS,
   changeTypeLabel,
@@ -46,11 +48,17 @@ function CompactKpi({
 export function BomComparePanel({
   projectId,
   onProjectChange,
+  overview,
+  cardId,
+  onCardChange,
   initialBaseId,
   initialTargetId,
 }: {
   projectId: number | null;
   onProjectChange: (id: number) => void;
+  overview: ProjectOverviewContext | null;
+  cardId: number | null;
+  onCardChange: (cardId: number) => void;
   initialBaseId?: number | null;
   initialTargetId?: number | null;
 }) {
@@ -95,18 +103,42 @@ export function BomComparePanel({
     loadVersions();
   }, [loadVersions]);
 
+  const cardVersions = useMemo(() => {
+    if (cardId == null) return versions;
+    return versions.filter((v) => v.card_id === cardId);
+  }, [versions, cardId]);
+
+  const selectedCard = overview?.cards.find((c) => c.id === cardId) ?? null;
+
   useEffect(() => {
-    if (versions.length < 2) return;
+    if (cardVersions.length === 0) {
+      setBaseId(null);
+      setTargetId(null);
+      setResult(null);
+      return;
+    }
+    const ids = new Set(cardVersions.map((v) => v.id));
+    setBaseId((cur) => (cur != null && ids.has(cur) ? cur : null));
+    setTargetId((cur) => (cur != null && ids.has(cur) ? cur : null));
+  }, [cardId, cardVersions]);
+
+  useEffect(() => {
+    if (cardVersions.length < 2) return;
     if (initialBaseId != null || initialTargetId != null) return;
-    const sorted = [...versions].sort((a, b) => b.id - a.id);
+    const sorted = [...cardVersions].sort((a, b) => b.id - a.id);
     const active = sorted.find((v) => v.is_project_active) ?? sorted[0];
     const prev = sorted.find((v) => v.id < active.id) ?? sorted[1];
     setBaseId((cur) => cur ?? prev?.id ?? sorted[1]?.id ?? null);
     setTargetId((cur) => cur ?? active?.id ?? sorted[0]?.id ?? null);
-  }, [versions, initialBaseId, initialTargetId]);
+  }, [cardVersions, initialBaseId, initialTargetId]);
 
-  const canCompare = projectId != null && baseId != null && targetId != null && baseId !== targetId;
-  const needsMoreVersions = versions.length < 2;
+  const canCompare =
+    projectId != null &&
+    cardId != null &&
+    baseId != null &&
+    targetId != null &&
+    baseId !== targetId;
+  const needsMoreVersions = cardId != null && cardVersions.length < 2;
 
   async function runCompare() {
     if (!canCompare || projectId == null || baseId == null || targetId == null) return;
@@ -126,8 +158,8 @@ export function BomComparePanel({
   }
 
   function compareActiveVsPrevious() {
-    if (versions.length < 2) return;
-    const sorted = [...versions].sort((a, b) => b.id - a.id);
+    if (cardVersions.length < 2) return;
+    const sorted = [...cardVersions].sort((a, b) => b.id - a.id);
     const active = sorted.find((v) => v.is_project_active) ?? sorted[0];
     const prev = sorted.find((v) => v.id < active.id) ?? sorted[1];
     if (prev && active) {
@@ -139,9 +171,11 @@ export function BomComparePanel({
   useEffect(() => {
     if (canCompare && !needsMoreVersions) {
       runCompare();
+    } else {
+      setResult(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseId, targetId, projectId]);
+  }, [baseId, targetId, projectId, cardId]);
 
   const filtered = useMemo(() => {
     if (!result) return [];
@@ -169,31 +203,28 @@ export function BomComparePanel({
 
   return (
     <div className="flex flex-col gap-2 min-h-0 flex-1">
-      <div className="flex flex-wrap items-center gap-2 shrink-0">
-        <select
-          className={`${sel} min-w-[200px]`}
-          value={projectId ?? ""}
-          onChange={(e) => {
-            const id = Number(e.target.value);
-            if (Number.isFinite(id)) onProjectChange(id);
-          }}
-        >
-          <option value="">בחר פרויקט…</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+      <CardBatchScopeBar
+        overview={overview}
+        cardId={cardId}
+        versionId={null}
+        loading={overview == null && projectId != null}
+        onCardChange={onCardChange}
+        onBatchChange={() => {}}
+        hideBatchSelect
+        projects={projects}
+        projectId={projectId}
+        onProjectChange={onProjectChange}
+      />
 
+      <div className="flex flex-wrap items-center gap-2 shrink-0">
         <select
           className={sel}
           value={baseId ?? ""}
-          disabled={!projectId || needsMoreVersions}
+          disabled={!cardId || needsMoreVersions}
           onChange={(e) => setBaseId(Number(e.target.value) || null)}
         >
           <option value="">גרסת מקור…</option>
-          {versions.map((v) => (
+          {cardVersions.map((v) => (
             <option key={v.id} value={v.id}>
               {versionDisplayName(v)}
             </option>
@@ -203,11 +234,11 @@ export function BomComparePanel({
         <select
           className={sel}
           value={targetId ?? ""}
-          disabled={!projectId || needsMoreVersions}
+          disabled={!cardId || needsMoreVersions}
           onChange={(e) => setTargetId(Number(e.target.value) || null)}
         >
           <option value="">גרסת יעד…</option>
-          {versions.map((v) => (
+          {cardVersions.map((v) => (
             <option key={v.id} value={v.id}>
               {versionDisplayName(v)}
             </option>
@@ -216,11 +247,11 @@ export function BomComparePanel({
 
         <button
           type="button"
-          disabled={versions.length < 2}
+          disabled={cardVersions.length < 2}
           onClick={compareActiveVsPrevious}
           className="h-8 px-2.5 rounded-md border border-slate-200 text-[11px] bg-white hover:bg-slate-50 disabled:opacity-50"
         >
-          השווה פעילה מול קודמת
+          השווה נוכחית מול קודמת
         </button>
 
         <button
@@ -234,20 +265,33 @@ export function BomComparePanel({
         </button>
       </div>
 
+      {selectedCard && (
+        <p className="text-[11px] text-slate-500 shrink-0">
+          משווה מנות בתוך כרטיס <strong className="text-slate-700">{selectedCard.name}</strong>
+          {cardVersions.length > 0 && (
+            <> · {cardVersions.length} מנה/ות זמינות</>
+          )}
+        </p>
+      )}
+
       {error && (
         <div className="px-2 py-1 rounded-md border border-red-200 bg-red-50 text-red-800 text-[11px]">{error}</div>
       )}
 
       {!projectId ? (
         <Card className="p-8 text-center text-[13px] text-slate-500">בחר פרויקט כדי לראות גרסאות BOM</Card>
+      ) : cardId == null ? (
+        <Card className="p-8 text-center text-[13px] text-slate-500">בחר כרטיס כדי להשוות מנות BOM</Card>
       ) : needsMoreVersions ? (
         <Card className="p-8 text-center">
-          <p className="text-[13px] text-slate-600">צריך לפחות שתי גרסאות BOM כדי לבצע השוואה</p>
+          <p className="text-[13px] text-slate-600">
+            לכרטיס «{selectedCard?.name ?? "—"}» יש מנה אחת בלבד — נדרשות לפחות שתי מנות (גרסאות) באותו כרטיס
+          </p>
           <Link
-            href={`/upload-bom?project_id=${projectId}`}
+            href={`/upload-bom?project_id=${projectId}${cardId != null ? `&card_id=${cardId}` : ""}`}
             className="inline-flex items-center gap-1 mt-3 h-8 px-3 rounded-md border border-brand/30 text-[12px] bg-brand-soft text-brand"
           >
-            <Upload className="w-3.5 h-3.5" /> טען גרסת BOM נוספת
+            <Upload className="w-3.5 h-3.5" /> טען מנה נוספת לכרטיס
           </Link>
         </Card>
       ) : result ? (
@@ -265,6 +309,12 @@ export function BomComparePanel({
           </div>
 
           <div className="text-[11px] text-slate-500 shrink-0">
+            {selectedCard && (
+              <>
+                כרטיס: <strong>{selectedCard.name}</strong>
+                {" · "}
+              </>
+            )}
             מקור: <strong>{versionDisplayName(result.base_version)}</strong>
             {" → "}
             יעד: <strong>{versionDisplayName(result.target_version)}</strong>
@@ -375,7 +425,7 @@ export function BomComparePanel({
                           <td className="p-2 whitespace-nowrap">
                             {lineId && projectId && targetId ? (
                               <Link
-                                href={`/bom?project_id=${projectId}&version_id=${targetId}&line_id=${lineId}`}
+                                href={`/bom?project_id=${projectId}${cardId != null ? `&card_id=${cardId}` : ""}&version_id=${targetId}&line_id=${lineId}`}
                                 className="text-brand hover:underline text-[10px]"
                               >
                                 פתח שורה

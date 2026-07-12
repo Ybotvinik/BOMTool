@@ -35,6 +35,7 @@ export async function apiPost<T>(
   path: string,
   body: unknown,
   userId?: number,
+  signal?: AbortSignal,
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (userId != null) headers["X-User-Id"] = String(userId);
@@ -42,6 +43,7 @@ export async function apiPost<T>(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) await parseError(res, path, "POST");
   return res.json() as Promise<T>;

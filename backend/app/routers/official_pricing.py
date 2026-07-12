@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -64,11 +64,12 @@ from app.services.suppliers.component_lookup import (
 )
 from app.services.suppliers.official_pricing import (
     create_official_snapshot,
-    fetch_official_pricing,
     get_fetch_progress,
     get_official_results,
+    run_official_pricing_fetch_background,
     supplier_config_status,
     test_supplier_search,
+    validate_official_pricing_fetch,
 )
 from app.services.suppliers.project_production_summary import get_project_production_summary
 from app.services.suppliers.workbench import (
@@ -235,23 +236,57 @@ def get_fetch_progress_endpoint(
 @router.post("/fetch", response_model=OfficialPricingFetchResponse)
 def post_fetch_official_pricing(
     payload: OfficialPricingFetchRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user_id: int | None = Depends(get_current_user_id),
 ) -> OfficialPricingFetchResponse:
     try:
-        result = fetch_official_pricing(
+        meta = validate_official_pricing_fetch(
             db,
             project_id=payload.project_id,
             bom_version_id=payload.bom_version_id,
             suppliers=payload.suppliers,
             mode=payload.mode,
-            user_id=user_id,
         )
-        return OfficialPricingFetchResponse(**result)
     except SupplierApiError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    progress = get_fetch_progress(
+        db,
+        project_id=payload.project_id,
+        bom_version_id=payload.bom_version_id,
+    )
+    if progress["running"]:
+        return OfficialPricingFetchResponse(
+            query_ids=[],
+            total_lines=meta["total_lines"],
+            priced_count=progress["priced_count"],
+            missing_count=progress["missing_count"],
+            error_count=progress["error_count"],
+            is_mock=meta["is_mock"],
+            started=True,
+            already_running=True,
+        )
+
+    background_tasks.add_task(
+        run_official_pricing_fetch_background,
+        project_id=payload.project_id,
+        bom_version_id=payload.bom_version_id,
+        suppliers=payload.suppliers,
+        mode=payload.mode,
+        user_id=user_id,
+    )
+    return OfficialPricingFetchResponse(
+        query_ids=[],
+        total_lines=meta["total_lines"],
+        priced_count=0,
+        missing_count=0,
+        error_count=0,
+        is_mock=meta["is_mock"],
+        started=True,
+    )
 
 
 @router.get("/results", response_model=OfficialPricingResultsResponse)

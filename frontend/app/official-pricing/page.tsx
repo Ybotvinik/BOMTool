@@ -21,6 +21,7 @@ import { PricingModeSwitch } from "@/components/official-pricing/PricingModeSwit
 import { PricingComparisonCards } from "@/components/official-pricing/PricingComparisonCards";
 import { SingleComponentCheckPanel } from "@/components/official-pricing/SingleComponentCheckPanel";
 import { ProjectProductionSummaryPanel } from "@/components/official-pricing/ProjectProductionSummaryPanel";
+import { OfficialPricingExportPanel } from "@/components/official-pricing/OfficialPricingExportPanel";
 import {
   FILTERS,
   fmtPrice,
@@ -64,6 +65,8 @@ type FetchResponse = {
   retry_attempted?: number;
   retry_recovered?: number;
   is_mock: boolean;
+  started?: boolean;
+  already_running?: boolean;
 };
 
 type FetchProgress = {
@@ -74,7 +77,15 @@ type FetchProgress = {
   missing_count: number;
   error_count: number;
   suppliers: string[];
+  phase?: "idle" | "primary" | "retry";
 };
+
+const FETCH_POLL_MS = 3000;
+const FETCH_WORKBENCH_REFRESH_MS = 15000;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
 
 type SnapshotResponse = {
   snapshot_id: number;
@@ -89,6 +100,7 @@ const OFFICIAL_PRICING_TABS = [
   { id: "workbench", label: "מחירון BOM" },
   { id: "production-summary", label: "סיכום ייצור" },
   { id: "component-check", label: "בדיקת רכיב בודד" },
+  { id: "export", label: "ייצוא" },
 ] as const;
 
 type OfficialPricingTab = (typeof OFFICIAL_PRICING_TABS)[number]["id"];
@@ -295,7 +307,9 @@ function OfficialPricingPageInner() {
   const [summary, setSummary] = useState<WorkbenchSummary | null>(null);
   const [fetchResult, setFetchResult] = useState<FetchResponse | null>(null);
   const [fetchProgress, setFetchProgress] = useState<FetchProgress | null>(null);
-  const fetchPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchWaitRef = useRef(false);
+  const lastWorkbenchRefreshRef = useRef(0);
+  const lastProgressCountRef = useRef(0);
   const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
   const [snapshotName, setSnapshotName] = useState("Supplier Pricing Snapshot");
 
@@ -475,36 +489,121 @@ function OfficialPricingPageInner() {
     }
   }, [projectId, versionId]);
 
-  const pollFetchProgress = useCallback(async () => {
+  const refreshWorkbenchDuringFetch = useCallback(async () => {
     if (projectId == null || versionId == null) return;
     try {
-      const [data, progress] = await Promise.all([
-        apiGet<WorkbenchResponse>(
-          `/api/official-pricing/workbench?project_id=${projectId}&bom_version_id=${versionId}`,
-        ),
-        apiGet<FetchProgress>(
-          `/api/official-pricing/fetch-progress?project_id=${projectId}&bom_version_id=${versionId}`,
-        ),
-      ]);
+      const data = await apiGet<WorkbenchResponse>(
+        `/api/official-pricing/workbench?project_id=${projectId}&bom_version_id=${versionId}`,
+      );
       setLines(data.lines);
       setSummary(data.summary);
       setPricingComparison(data.pricing_comparison ?? null);
-      setFetchProgress(progress);
+      lastWorkbenchRefreshRef.current = Date.now();
     } catch {
-      /* ignore transient poll errors during long fetch */
+      /* ignore transient errors during long fetch */
     }
   }, [projectId, versionId]);
 
+  const readFetchProgress = useCallback(async (): Promise<FetchProgress | null> => {
+    if (projectId == null || versionId == null) return null;
+    return apiGet<FetchProgress>(
+      `/api/official-pricing/fetch-progress?project_id=${projectId}&bom_version_id=${versionId}`,
+    );
+  }, [projectId, versionId]);
+
+  const applyFetchProgress = useCallback(
+    async (progress: FetchProgress) => {
+      setFetchProgress(progress);
+      const now = Date.now();
+      const progressDelta = progress.completed_results - lastProgressCountRef.current;
+      lastProgressCountRef.current = progress.completed_results;
+      const shouldRefreshWorkbench =
+        progress.running &&
+        (now - lastWorkbenchRefreshRef.current >= FETCH_WORKBENCH_REFRESH_MS ||
+          progressDelta >= 10);
+      if (shouldRefreshWorkbench) {
+        await refreshWorkbenchDuringFetch();
+      }
+    },
+    [refreshWorkbenchDuringFetch],
+  );
+
+  const waitForFetchCompletion = useCallback(async (): Promise<FetchProgress | null> => {
+    fetchWaitRef.current = true;
+    try {
+      let sawRunning = false;
+      let idlePolls = 0;
+      for (;;) {
+        const progress = await readFetchProgress();
+        if (!progress) return null;
+        await applyFetchProgress(progress);
+        if (progress.running) {
+          sawRunning = true;
+          idlePolls = 0;
+        } else if (sawRunning) {
+          return progress;
+        } else {
+          idlePolls += 1;
+          if (idlePolls >= 20) return progress;
+        }
+        await sleep(FETCH_POLL_MS);
+      }
+    } finally {
+      fetchWaitRef.current = false;
+    }
+  }, [applyFetchProgress, readFetchProgress]);
+
   useEffect(() => {
     return () => {
-      if (fetchPollRef.current != null) clearInterval(fetchPollRef.current);
+      fetchWaitRef.current = false;
     };
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "workbench") return;
+    if (activeTab !== "workbench" || busy) return;
     loadWorkbench();
-  }, [loadWorkbench, activeTab]);
+  }, [loadWorkbench, activeTab, busy]);
+
+  useEffect(() => {
+    if (projectId == null || versionId == null || activeTab !== "workbench") return;
+    let cancelled = false;
+    void (async () => {
+      const progress = await readFetchProgress();
+      if (cancelled || !progress?.running) return;
+      setBusy(true);
+      setFetchResult(null);
+      lastWorkbenchRefreshRef.current = 0;
+      lastProgressCountRef.current = 0;
+      await applyFetchProgress(progress);
+      const finalProgress = await waitForFetchCompletion();
+      if (cancelled) return;
+      if (finalProgress) {
+        setFetchResult({
+          query_ids: [],
+          total_lines: finalProgress.total_expected,
+          priced_count: finalProgress.priced_count,
+          missing_count: finalProgress.missing_count,
+          error_count: finalProgress.error_count,
+          is_mock: false,
+        });
+      }
+      await loadWorkbench();
+      setFetchProgress(null);
+      setBusy(false);
+    })();
+    return () => {
+      cancelled = true;
+      fetchWaitRef.current = false;
+    };
+  }, [
+    projectId,
+    versionId,
+    activeTab,
+    readFetchProgress,
+    applyFetchProgress,
+    waitForFetchCompletion,
+    loadWorkbench,
+  ]);
 
   const updateLine = (row: WorkbenchLine) => {
     setLines((prev) => prev.map((l) => (l.bom_line_id === row.bom_line_id ? row : l)));
@@ -542,7 +641,7 @@ function OfficialPricingPageInner() {
       (suppliers.ti && config.ti.credentials_missing));
 
   async function doFetch() {
-    if (projectId == null || versionId == null) return;
+    if (projectId == null || versionId == null || busy) return;
     const selected = selectedSuppliers;
     if (!selected.length) {
       setError("יש לבחור לפחות ספק אחד");
@@ -552,26 +651,37 @@ function OfficialPricingPageInner() {
     setError(null);
     setFetchResult(null);
     setFetchProgress(null);
-    if (fetchPollRef.current != null) clearInterval(fetchPollRef.current);
-    fetchPollRef.current = setInterval(() => {
-      void pollFetchProgress();
-    }, 3000);
-    void pollFetchProgress();
+    lastWorkbenchRefreshRef.current = 0;
+    lastProgressCountRef.current = 0;
     try {
       const res = await apiPost<FetchResponse>(
         "/api/official-pricing/fetch",
         { project_id: projectId, bom_version_id: versionId, suppliers: selected, mode },
         user.id,
       );
-      setFetchResult(res);
+      if (res.already_running) {
+        setError("משיכת מחירים כבר פועלת ברקע — מציג התקדמות");
+      }
+      const finalProgress = await waitForFetchCompletion();
+      if (finalProgress) {
+        setFetchResult({
+          query_ids: res.query_ids,
+          total_lines: finalProgress.total_expected || res.total_lines,
+          priced_count: finalProgress.priced_count,
+          missing_count: finalProgress.missing_count,
+          error_count: finalProgress.error_count,
+          retry_attempted: res.retry_attempted,
+          retry_recovered: res.retry_recovered,
+          is_mock: res.is_mock,
+          started: res.started,
+        });
+      } else if (!res.started) {
+        setFetchResult(res);
+      }
       await loadWorkbench();
     } catch (e) {
       setError(String(e).replace(/^Error:\s*/, ""));
     } finally {
-      if (fetchPollRef.current != null) {
-        clearInterval(fetchPollRef.current);
-        fetchPollRef.current = null;
-      }
       setFetchProgress(null);
       setBusy(false);
     }
@@ -806,6 +916,35 @@ function OfficialPricingPageInner() {
         />
       )}
 
+      {activeTab === "export" && projectId != null && (
+        <div className="flex flex-col gap-3 min-h-0 flex-1 overflow-auto pb-4">
+          <CardBatchScopeBar
+            variant="card"
+            overview={scope.overview}
+            cardId={scope.cardId}
+            versionId={scope.versionId}
+            loading={scope.loading}
+            onCardChange={selectCard}
+            onBatchChange={selectBatch}
+            projects={projects}
+            projectId={projectId}
+            onProjectChange={selectProject}
+          />
+          <OfficialPricingExportPanel
+            projectId={projectId}
+            versionId={versionId}
+            projectName={selectedProject?.name}
+            versionLabel={
+              scope.selectedBatch
+                ? formatBatchLabel(scope.selectedBatch)
+                : undefined
+            }
+            userId={user.id}
+            showWorkbenchExport
+          />
+        </div>
+      )}
+
       {activeTab === "component-check" ? (
         <SingleComponentCheckPanel config={config} />
       ) : activeTab === "production-summary" ? (
@@ -831,7 +970,7 @@ function OfficialPricingPageInner() {
             projectName={selectedProject?.name}
           />
         </div>
-      ) : (
+      ) : activeTab === "export" ? null : (
         <>
 
       {(config?.mock_mode || (!config?.mock_mode && credentialsMissing)) && (
@@ -913,17 +1052,28 @@ function OfficialPricingPageInner() {
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
             משוך מחירים
           </button>
-          {busy && fetchProgress?.running && fetchProgress.total_expected > 0 && (
+          {busy && (
             <>
               <span className="text-slate-200">|</span>
-              <CompactKpi
-                label="התקדמות"
-                value={`${fetchProgress.completed_results}/${fetchProgress.total_expected}`}
-                tone="muted"
-              />
-              <CompactKpi label="מתומחרות" value={String(fetchProgress.priced_count)} tone="good" />
-              <CompactKpi label="חסרות" value={String(fetchProgress.missing_count)} tone="warn" />
-              <CompactKpi label="שגיאות" value={String(fetchProgress.error_count)} tone="bad" />
+              <span className="text-[10.5px] text-slate-500">
+                {fetchProgress?.phase === "retry"
+                  ? "מנסה שוב שורות שנכשלו…"
+                  : fetchProgress?.running && fetchProgress.total_expected > 0
+                    ? "שולף מחירים מהספקים — התצוגה מתעדכנת כל ~15 שניות"
+                    : "מתחיל משיכת מחירים…"}
+              </span>
+              {fetchProgress?.running && fetchProgress.total_expected > 0 && (
+                <>
+                  <CompactKpi
+                    label="התקדמות"
+                    value={`${fetchProgress.completed_results}/${fetchProgress.total_expected}`}
+                    tone="muted"
+                  />
+                  <CompactKpi label="מתומחרות" value={String(fetchProgress.priced_count)} tone="good" />
+                  <CompactKpi label="חסרות" value={String(fetchProgress.missing_count)} tone="warn" />
+                  <CompactKpi label="שגיאות" value={String(fetchProgress.error_count)} tone="bad" />
+                </>
+              )}
             </>
           )}
           {fetchResult && (

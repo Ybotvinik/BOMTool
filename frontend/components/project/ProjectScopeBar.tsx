@@ -103,7 +103,7 @@ export function ProjectScopeBar({
               selectedCard.batches.map((batch) => (
                 <option key={batch.id} value={batch.id}>
                   {formatBatchLabel(batch)}
-                  {batch.is_project_active ? " ★" : ""}
+                  {batch.is_project_active ? " ★ ראשי" : ""}
                   {batch.bom_items_count ? ` · ${batch.bom_items_count} פריטים` : ""}
                 </option>
               ))

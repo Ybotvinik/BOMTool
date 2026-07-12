@@ -11,6 +11,7 @@ from app.models import (
     Customer,
     OfficialPriceSnapshot,
     Project,
+    ProjectCard,
 )
 from app.schemas.bom_compare import (
     BomCompareChangeRow,
@@ -312,6 +313,12 @@ def build_version_catalog(db: Session, project_id: int) -> BomVersionCatalogResp
     )
     version_ids = [v.id for v in versions]
     snap_counts = _snapshot_counts(db, version_ids)
+    card_names = {
+        int(c.id): c.name
+        for c in db.scalars(
+            select(ProjectCard).where(ProjectCard.project_id == project_id)
+        )
+    }
 
     items: list[BomVersionCatalogItem] = []
     last_uploaded = None
@@ -332,6 +339,7 @@ def build_version_catalog(db: Session, project_id: int) -> BomVersionCatalogResp
         items.append(
             BomVersionCatalogItem(
                 **BomVersionRead.model_validate(version).model_dump(),
+                card_name=card_names.get(version.card_id) if version.card_id else None,
                 total_lines=total,
                 dnp_count=dnp_count,
                 non_dnp_count=max(0, total - dnp_count),

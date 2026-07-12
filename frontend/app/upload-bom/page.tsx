@@ -502,7 +502,7 @@ function UploadBomInner() {
             </div>
             <label className="flex items-center gap-2 text-[12.5px] text-slate-700">
               <input type="checkbox" checked={setActive} onChange={(e) => setSetActive(e.target.checked)} />
-              קבע כגרסה פעילה
+              קבע ככרטיס ראשי
             </label>
 
             <label

@@ -565,7 +565,9 @@ function ProcurementFileInner() {
                     <div className="flex items-center gap-1 truncate">
                       {versionLabel(data.bom_version)}
                       {data.bom_version.is_project_active && (
-                        <Star className="w-3 h-3 text-brand fill-brand shrink-0" />
+                        <span title="כרטיס ראשי">
+                          <Star className="w-3 h-3 text-brand fill-brand shrink-0" />
+                        </span>
                       )}
                     </div>
                   </div>

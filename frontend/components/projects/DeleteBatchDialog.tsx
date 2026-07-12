@@ -70,7 +70,7 @@ export function DeleteBatchDialog({
 
           {target.isActiveBatch && (
             <p className="text-[11px] text-slate-500">
-              זו המנה הפעילה בפרויקט — לאחר המחיקה תיבחר אוטומטית מנה אחרת (אם קיימת).
+              זו המנה של הכרטיס הראשי — לאחר המחיקה יוגדר כרטיס ראשי אחר (אם קיים).
             </p>
           )}
 

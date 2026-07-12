@@ -180,7 +180,7 @@ export function EditProjectParamsModal({
               </select>
             </Field>
           </div>
-          <Field label="גרסת BOM פעילה">
+          <Field label="כרטיס ראשי (BOM)">
             <select
               className={inp}
               value={form.active_version_id}

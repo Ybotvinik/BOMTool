@@ -458,7 +458,7 @@ function ProjectOverviewInner() {
     (metrics?.official_snapshot_total != null && batchQty > 0
       ? metrics.official_snapshot_total / batchQty
       : null);
-  const exportHref = `/export?project_id=${pid}${versionId != null ? `&bom_version_id=${versionId}` : ""}`;
+  const exportHref = `/export?project_id=${pid}${scopeCardId != null ? `&card_id=${scopeCardId}` : ""}${versionId != null ? `&version_id=${versionId}` : ""}`;
 
   const paramsForm: ProjectParamsForm = {
     name: project.name,

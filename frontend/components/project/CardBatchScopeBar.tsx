@@ -23,6 +23,7 @@ type Props = {
   cardDefaultQuantity?: number | null;
   onSaveBuildQuantity?: (qty: number) => Promise<void>;
   savingQty?: boolean;
+  hideBatchSelect?: boolean;
 };
 
 const inp =
@@ -45,11 +46,13 @@ export function CardBatchScopeBar({
   cardDefaultQuantity,
   onSaveBuildQuantity,
   savingQty = false,
+  hideBatchSelect = false,
 }: Props) {
   const selectedCard = overview?.cards.find((c) => c.id === cardId) ?? null;
   const isInline = variant === "inline";
   const showBuildQty = onSaveBuildQuantity != null;
   const showProject = projects != null && onProjectChange != null;
+  const showBatch = !hideBatchSelect;
 
   const [qtyDraft, setQtyDraft] = useState(
     String(buildQuantity ?? cardDefaultQuantity ?? 1),
@@ -130,7 +133,7 @@ export function CardBatchScopeBar({
           <option key={batch.id} value={batch.id}>
             {formatBatchLabel(batch)}
             {batch.build_quantity != null ? ` · ×${batch.build_quantity.toLocaleString()}` : ""}
-            {batch.is_project_active ? " ★" : ""}
+            {batch.is_project_active ? " ★ ראשי" : ""}
             {batch.bom_items_count ? ` · ${batch.bom_items_count} פריטים` : ""}
           </option>
         ))
@@ -174,13 +177,14 @@ export function CardBatchScopeBar({
         {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400 shrink-0" />}
         {projectSelect}
         {cardSelect}
-        {batchSelect}
+        {showBatch && batchSelect}
         {buildQtyField}
       </div>
     );
   }
 
-  const colCount = 2 + (showProject ? 1 : 0) + (showBuildQty ? 1 : 0);
+  const colCount =
+    (showProject ? 1 : 0) + 1 + (showBatch ? 1 : 0) + (showBuildQty ? 1 : 0);
   const gridClass =
     colCount >= 4
       ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-4"
@@ -223,7 +227,7 @@ export function CardBatchScopeBar({
       <div className={clsx("grid gap-2", gridClass)}>
         {showProject && <Field label="פרויקט">{projectSelect}</Field>}
         <Field label="כרטיס">{cardSelect}</Field>
-        <Field label="מנה (הרצת ייצור)">{batchSelect}</Field>
+        {showBatch && <Field label="מנה (הרצת ייצור)">{batchSelect}</Field>}
         {showBuildQty && (
           <Field
             label="כמות להרכבה (מנה)"

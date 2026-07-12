@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -236,6 +236,73 @@ def _commit_fetch_progress(db: Session, *refresh: object) -> None:
         db.refresh(obj)
 
 
+def _cancel_stale_running_queries(
+    db: Session,
+    *,
+    project_id: int,
+    bom_version_id: int,
+) -> None:
+    """Mark leftover running queries as failed when a new fetch starts."""
+    now = datetime.now(timezone.utc)
+    stale = list(
+        db.scalars(
+            select(OfficialSupplierQuery).where(
+                OfficialSupplierQuery.project_id == project_id,
+                OfficialSupplierQuery.bom_version_id == bom_version_id,
+                OfficialSupplierQuery.status == "running",
+            )
+        )
+    )
+    if not stale:
+        return
+    for query in stale:
+        query.status = "failed"
+        query.error_message = "Cancelled — new fetch started"
+        query.completed_at = now
+    db.commit()
+
+
+_FETCH_SESSION_WINDOW = timedelta(seconds=30)
+
+
+def _fetch_session_queries(
+    db: Session,
+    *,
+    project_id: int,
+    bom_version_id: int,
+    running: list[OfficialSupplierQuery],
+) -> list[OfficialSupplierQuery]:
+    """All supplier queries in the current fetch batch (including completed suppliers)."""
+    session_start = min(q.started_at for q in running)
+    window_start = session_start - _FETCH_SESSION_WINDOW
+    return list(
+        db.scalars(
+            select(OfficialSupplierQuery)
+            .where(
+                OfficialSupplierQuery.project_id == project_id,
+                OfficialSupplierQuery.bom_version_id == bom_version_id,
+                OfficialSupplierQuery.started_at >= window_start,
+            )
+            .order_by(OfficialSupplierQuery.started_at)
+        )
+    )
+
+
+def _summarize_fetch_results(results: list[OfficialSupplierPriceResult]) -> tuple[int, int, int]:
+    priced = missing = errors = 0
+    for row in results:
+        if row.match_status == "error":
+            errors += 1
+        elif row.unit_price is not None and row.match_status in (
+            "matched",
+            "possible_match",
+        ):
+            priced += 1
+        else:
+            missing += 1
+    return priced, missing, errors
+
+
 def get_fetch_progress(
     db: Session,
     *,
@@ -263,10 +330,17 @@ def get_fetch_progress(
             "missing_count": 0,
             "error_count": 0,
             "suppliers": [],
+            "phase": "idle",
         }
 
-    query_ids = [q.id for q in running]
-    total_expected = sum(q.total_lines for q in running)
+    session_queries = _fetch_session_queries(
+        db,
+        project_id=project_id,
+        bom_version_id=bom_version_id,
+        running=running,
+    )
+    query_ids = [q.id for q in session_queries]
+    total_expected = sum(q.total_lines for q in session_queries)
     results = list(
         db.scalars(
             select(OfficialSupplierPriceResult).where(
@@ -274,17 +348,13 @@ def get_fetch_progress(
             )
         )
     )
-    priced = missing = errors = 0
-    for row in results:
-        if row.match_status == "error":
-            errors += 1
-        elif row.unit_price is not None and row.match_status in (
-            "matched",
-            "possible_match",
-        ):
-            priced += 1
-        else:
-            missing += 1
+    priced, missing, errors = _summarize_fetch_results(results)
+
+    completed_in_session = [q for q in session_queries if q.status == "completed" and q.completed_at]
+    retry_phase = False
+    if completed_in_session:
+        latest_completed_at = max(q.completed_at for q in completed_in_session if q.completed_at)
+        retry_phase = all(q.started_at >= latest_completed_at for q in running)
 
     return {
         "running": True,
@@ -293,8 +363,124 @@ def get_fetch_progress(
         "priced_count": priced,
         "missing_count": missing,
         "error_count": errors,
-        "suppliers": [q.supplier for q in running],
+        "suppliers": sorted({q.supplier for q in session_queries}),
+        "phase": "retry" if retry_phase else "primary",
     }
+
+
+def validate_official_pricing_fetch(
+    db: Session,
+    *,
+    project_id: int,
+    bom_version_id: int,
+    suppliers: list[str],
+    mode: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    """Validate fetch request and return metadata before starting background work."""
+    settings = settings or get_settings()
+    project = db.get(Project, project_id)
+    if project is None:
+        raise ValueError("Project not found")
+    version = db.get(BomVersion, bom_version_id)
+    if version is None or version.project_id != project_id:
+        raise ValueError("BOM version not found")
+
+    valid_suppliers = [s for s in suppliers if s in OFFICIAL_API_SUPPLIERS]
+    if not valid_suppliers:
+        raise ValueError("No valid suppliers selected")
+
+    fetch_suppliers: list[str] = []
+    skipped_suppliers: list[str] = []
+    for s in valid_suppliers:
+        if settings.supplier_api_mock:
+            fetch_suppliers.append(s)
+            continue
+        client = _client_for_supplier(s, settings)
+        if client.credentials_configured():
+            fetch_suppliers.append(s)
+        else:
+            name = SUPPLIER_DISPLAY_NAMES.get(s, s)
+            skipped_suppliers.append(name)
+            logger.warning("%s skipped — API credentials missing", name)
+
+    if not fetch_suppliers and not settings.supplier_api_mock:
+        if skipped_suppliers:
+            raise SupplierApiError(
+                f"No supplier credentials configured for: {', '.join(skipped_suppliers)}",
+                supplier=None,
+            )
+        raise ValueError("No suppliers available to fetch")
+
+    bom_lines = list(
+        db.scalars(
+            select(BomLine)
+            .where(BomLine.bom_version_id == bom_version_id)
+            .order_by(BomLine.line_no, BomLine.id)
+        )
+    )
+    active_lines = [bl for bl in bom_lines if not _is_dnp_line(bl)]
+    overrides = _overrides_by_line(db, project_id, bom_version_id)
+
+    if mode == "missing_only":
+        existing = _latest_results_by_line(db, bom_version_id, fetch_suppliers, settings=settings)
+        lines_to_fetch = []
+        for bl in active_lines:
+            has_price = any(
+                existing.get((bl.id, s)) and existing[(bl.id, s)].unit_price is not None
+                for s in fetch_suppliers
+            )
+            if not has_price:
+                lines_to_fetch.append(bl)
+    else:
+        lines_to_fetch = active_lines
+
+    return {
+        "total_lines": len(lines_to_fetch),
+        "is_mock": settings.supplier_api_mock,
+        "fetch_suppliers": fetch_suppliers,
+        "skipped_suppliers": skipped_suppliers,
+    }
+
+
+def run_official_pricing_fetch_background(
+    *,
+    project_id: int,
+    bom_version_id: int,
+    suppliers: list[str],
+    mode: str,
+    user_id: int | None,
+) -> None:
+    """Run bulk fetch in a background worker thread (own DB session)."""
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        fetch_official_pricing(
+            db,
+            project_id=project_id,
+            bom_version_id=bom_version_id,
+            suppliers=suppliers,
+            mode=mode,
+            user_id=user_id,
+        )
+    except Exception:
+        logger.exception(
+            "Official pricing background fetch failed for project=%s version=%s",
+            project_id,
+            bom_version_id,
+        )
+        try:
+            _cancel_stale_running_queries(
+                db,
+                project_id=project_id,
+                bom_version_id=bom_version_id,
+            )
+        except Exception:
+            logger.exception("Failed to clean up running official pricing queries")
+            db.rollback()
+    finally:
+        db.close()
 
 
 def fetch_official_pricing(
@@ -364,6 +550,8 @@ def fetch_official_pricing(
                 lines_to_fetch.append(bl)
     else:
         lines_to_fetch = active_lines
+
+    _cancel_stale_running_queries(db, project_id=project_id, bom_version_id=bom_version_id)
 
     log_activity(
         db,

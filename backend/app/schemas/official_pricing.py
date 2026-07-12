@@ -60,6 +60,8 @@ class OfficialPricingFetchResponse(BaseModel):
     retry_attempted: int = 0
     retry_recovered: int = 0
     is_mock: bool
+    started: bool = False
+    already_running: bool = False
 
 
 class OfficialPricingFetchProgress(BaseModel):
@@ -70,6 +72,7 @@ class OfficialPricingFetchProgress(BaseModel):
     missing_count: int
     error_count: int
     suppliers: list[str] = Field(default_factory=list)
+    phase: str = "idle"
 
 
 class SupplierResultCell(BaseModel):

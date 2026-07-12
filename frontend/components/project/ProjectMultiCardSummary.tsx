@@ -78,8 +78,8 @@ function MiniKpi({
 }
 
 function batchSelectionLabel(sel: string) {
-  if (sel === "active") return "מנה פעילה";
-  if (sel === "project_active") return "מנה מסומנת";
+  if (sel === "active") return "כרטיס ראשי";
+  if (sel === "project_active") return "כרטיס ראשי";
   if (sel === "latest") return "מנה אחרונה";
   return "—";
 }

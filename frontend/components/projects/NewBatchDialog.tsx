@@ -181,7 +181,7 @@ export function NewBatchDialog({ target, onClose, onCreated }: Props) {
                     {target.batches.map((b) => (
                       <option key={b.batch_id} value={b.batch_id}>
                         {b.batch_label}
-                        {b.is_active_batch ? " (פעיל)" : ""}
+                        {b.is_active_batch ? " (ראשי)" : ""}
                         {b.bom_items_count ? ` · ${b.bom_items_count} פריטים` : ""}
                       </option>
                     ))}
