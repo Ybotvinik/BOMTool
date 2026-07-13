@@ -39,6 +39,16 @@ export type LinePricingComparison = {
   has_east_price: boolean;
 };
 
+export type SavedManualSource = {
+  supplier_name: string | null;
+  supplier_part_number: string | null;
+  unit_price: number | null;
+  currency: string;
+  stock: number | null;
+  lead_time: string | null;
+  note: string | null;
+};
+
 export type WorkbenchLine = {
   bom_line_id: number;
   line_no: number | null;
@@ -70,6 +80,7 @@ export type WorkbenchLine = {
   line_pricing?: LinePricingComparison | null;
   recommended_supplier?: string | null;
   recommended_internal_only?: boolean;
+  saved_manual?: SavedManualSource | null;
 };
 
 export type PricingScenarioStats = {

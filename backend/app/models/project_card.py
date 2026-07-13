@@ -19,7 +19,7 @@ class ProjectCard(Base):
     code: Mapped[str | None] = mapped_column(String(60))
     board_name: Mapped[str | None] = mapped_column(String(160))
     build_quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    status: Mapped[str] = mapped_column(String(40), default="NEW", nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="ACTIVE", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

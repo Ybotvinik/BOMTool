@@ -649,6 +649,11 @@ def post_east_quote_import(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="הקובץ לא נמצא; יש להעלות מחדש") from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"שגיאת ייבוא: {exc}",
+        ) from exc
 
 
 @router.post("/east-quotes/detect-sheets", response_model=ExcelSheetsDetect)

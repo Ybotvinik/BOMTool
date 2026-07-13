@@ -15,8 +15,13 @@ CARD_STATUS_NEW = "NEW"
 CARD_STATUS_ACTIVE = "ACTIVE"
 CARD_STATUS_DONE = "DONE"
 
+BATCH_STATUS_NEW = "NEW"
+BATCH_STATUS_ACTIVE = "ACTIVE"
+BATCH_STATUS_DONE = "DONE"
+
 PROJECT_STATUSES = frozenset({PROJECT_STATUS_NEW, PROJECT_STATUS_ACTIVE, PROJECT_STATUS_DONE})
 CARD_STATUSES = frozenset({CARD_STATUS_NEW, CARD_STATUS_ACTIVE, CARD_STATUS_DONE})
+BATCH_STATUSES = frozenset({BATCH_STATUS_NEW, BATCH_STATUS_ACTIVE, BATCH_STATUS_DONE})
 
 _LEGACY_PROJECT_TO_NEW = {
     "active": PROJECT_STATUS_ACTIVE,
@@ -27,6 +32,20 @@ _LEGACY_PROJECT_TO_NEW = {
 _LEGACY_CARD_TO_NEW = {
     "active": CARD_STATUS_ACTIVE,
     "archived": CARD_STATUS_DONE,
+    "draft": CARD_STATUS_ACTIVE,
+    "in review": CARD_STATUS_ACTIVE,
+    "quoting": CARD_STATUS_ACTIVE,
+}
+_LEGACY_BATCH_TO_STATUS = {
+    "active": BATCH_STATUS_ACTIVE,
+    "draft": BATCH_STATUS_NEW,
+    "in review": BATCH_STATUS_ACTIVE,
+    "quoting": BATCH_STATUS_ACTIVE,
+    "new": BATCH_STATUS_NEW,
+    "archived": BATCH_STATUS_DONE,
+    "closed": BATCH_STATUS_DONE,
+    "complete": BATCH_STATUS_DONE,
+    "inactive": BATCH_STATUS_DONE,
 }
 
 
@@ -43,7 +62,26 @@ def normalize_card_status(status: str | None) -> str:
     if raw in CARD_STATUSES:
         return raw
     mapped = _LEGACY_CARD_TO_NEW.get(raw.lower())
-    return mapped or CARD_STATUS_NEW
+    return mapped or CARD_STATUS_ACTIVE
+
+
+def normalize_batch_status(
+    status: str | None,
+    *,
+    is_active: bool = False,
+    imported: bool = False,
+) -> str:
+    if is_active:
+        return BATCH_STATUS_ACTIVE
+    raw = (status or "").strip()
+    if raw in BATCH_STATUSES:
+        return raw
+    mapped = _LEGACY_BATCH_TO_STATUS.get(raw.lower())
+    if mapped:
+        return mapped
+    if imported:
+        return BATCH_STATUS_ACTIVE
+    return BATCH_STATUS_NEW
 
 
 def sync_project_status_from_cards(db: Session, project: Project) -> None:

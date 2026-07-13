@@ -63,17 +63,23 @@ function OfferCard({
   onFetch,
   fetching,
   disabled,
+  includeEast = false,
 }: {
   offer: SupplierOffer;
   onSelect: () => void;
   onFetch?: () => void;
   fetching?: boolean;
   disabled?: boolean;
+  includeEast?: boolean;
 }) {
   const selected = offer.is_currently_selected;
   const recommended = offer.is_recommended;
   const showFetch = onFetch && (needsFetch(offer) || offer.unit_price == null);
-  const canSelect = offer.unit_price != null && !offer.disabled_in_current_mode;
+  const eastBlocked = offer.internal_only && !includeEast;
+  const canSelect =
+    offer.unit_price != null &&
+    !eastBlocked &&
+    (!offer.disabled_in_current_mode || (offer.internal_only && includeEast));
 
   return (
     <div
@@ -113,7 +119,7 @@ function OfferCard({
         <MatchBadge offer={offer} />
       </div>
 
-      {offer.disabled_reason && (
+      {offer.disabled_reason && eastBlocked && (
         <p className="text-[10px] text-amber-700 mb-2 flex items-center gap-1">
           <Lock className="w-3 h-3" />
           {offer.disabled_reason}
@@ -267,6 +273,11 @@ export function SupplierOffersDrawer({
               {line.search_mpn_override_active && line.search_mpn && (
                 <p className="text-[10px] text-amber-600 mt-0.5">חיפוש: {line.search_mpn}</p>
               )}
+              {line.unit_price != null && (
+                <p className="text-[10px] text-brand font-semibold mt-1">
+                  מקור נבחר: {line.source} · {fmtPrice(line.unit_price, line.currency)} / יח׳
+                </p>
+              )}
             </div>
             <button onClick={onClose} className="h-8 w-8 rounded-md hover:bg-slate-100 flex items-center justify-center">
               <X className="h-4 w-4" />
@@ -354,6 +365,7 @@ export function SupplierOffersDrawer({
                   <OfferCard
                     key={`${offer.supplier}-${offer.supplier_part_number}`}
                     offer={offer}
+                    includeEast={includeEast}
                     disabled={!includeEast}
                     onSelect={() => onSelectSupplier(offer.supplier, offer.needs_review, true)}
                   />

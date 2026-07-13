@@ -21,6 +21,43 @@ from app.services.bom_parser import clean_display, detect_header_row, list_sheet
 
 SOURCE_TYPE_EAST = "east"
 
+# supplier_quote_lines VARCHAR limits — keep inserts within DB bounds.
+_EAST_LINE_FIELD_LIMITS: dict[str, int] = {
+    "mpn": 120,
+    "quoted_mpn": 120,
+    "manufacturer": 120,
+    "footprint": 120,
+    "value": 120,
+    "supplier_part_number": 120,
+    "assembly": 40,
+    "vendor": 120,
+    "lead_time": 40,
+    "brand": 120,
+    "supplier_code": 80,
+}
+
+
+def _clip_east_field(field: str, value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    limit = _EAST_LINE_FIELD_LIMITS.get(field)
+    if limit and len(text) > limit:
+        return text[:limit]
+    return text
+
+
+def _safe_stock_qty(value: float | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        qty = int(value)
+    except (TypeError, ValueError):
+        return None
+    return qty if qty >= 0 else None
+
 # Digi-Key / Mouser stock-number patterns — must not appear as Link supplier PN in UI.
 _DISTRIBUTOR_PN_SUFFIXES = ("-ND", "-DKR", "-TR-ND")
 
@@ -312,33 +349,34 @@ def upload_east_quote(
     db.flush()
 
     for ln in parsed.lines:
+        stock_qty = _safe_stock_qty(ln.quoted_qty)
         db.add(
             SupplierQuoteLine(
                 supplier_quote_id=quote.id,
                 line_number=ln.row_number,
                 quantity=ln.quantity,
                 designator=ln.designator,
-                mpn=ln.mpn,
-                quoted_mpn=ln.mpn,
+                mpn=_clip_east_field("mpn", ln.mpn),
+                quoted_mpn=_clip_east_field("quoted_mpn", ln.mpn),
                 cleaned_quoted_mpn=None,
-                manufacturer=ln.manufacturer or ln.brand,
+                manufacturer=_clip_east_field("manufacturer", ln.manufacturer or ln.brand),
                 description=ln.description,
-                footprint=ln.footprint,
-                value=ln.value,
-                supplier_part_number=ln.supplier_part_number,
-                assembly=ln.assembly,
-                vendor=ln.vendor,
+                footprint=_clip_east_field("footprint", ln.footprint),
+                value=_clip_east_field("value", ln.value),
+                supplier_part_number=_clip_east_field("supplier_part_number", ln.supplier_part_number),
+                assembly=_clip_east_field("assembly", ln.assembly),
+                vendor=_clip_east_field("vendor", ln.vendor),
                 quoted_qty=ln.quoted_qty,
                 unit_price=ln.unit_price,
                 total_price=ln.total_price,
                 currency=ln.currency,
-                lead_time=ln.lead_time,
-                brand=ln.brand,
-                supplier_code=ln.supplier_code,
+                lead_time=_clip_east_field("lead_time", ln.lead_time),
+                brand=_clip_east_field("brand", ln.brand),
+                supplier_code=_clip_east_field("supplier_code", ln.supplier_code),
                 notes=ln.comments,
                 is_dnp=ln.is_dnp,
-                available_qty=int(ln.quoted_qty) if ln.quoted_qty else None,
-                stock=int(ln.quoted_qty) if ln.quoted_qty else None,
+                available_qty=stock_qty,
+                stock=stock_qty,
             )
         )
 

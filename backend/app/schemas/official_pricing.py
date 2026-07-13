@@ -140,6 +140,16 @@ class LinePricingComparison(BaseModel):
     has_east_price: bool = False
 
 
+class SavedManualSource(BaseModel):
+    supplier_name: str | None = None
+    supplier_part_number: str | None = None
+    unit_price: float | None = None
+    currency: str = "USD"
+    stock: float | None = None
+    lead_time: str | None = None
+    note: str | None = None
+
+
 class WorkbenchLineResult(BaseModel):
     bom_line_id: int
     line_no: int | None
@@ -171,6 +181,7 @@ class WorkbenchLineResult(BaseModel):
     line_pricing: LinePricingComparison | None = None
     recommended_supplier: str | None = None
     recommended_internal_only: bool = False
+    saved_manual: SavedManualSource | None = None
 
 
 class PricingScenarioStats(BaseModel):

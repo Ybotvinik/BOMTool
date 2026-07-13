@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 from app.models import BomLine, BomVersion, Customer, Project, ProjectCard, User
 from app.services.bom_quality import compute_required_qty, reanalyze_bom_version_quality
 from app.services.project_status import (
+    BATCH_STATUS_ACTIVE,
+    BATCH_STATUS_NEW,
+    CARD_STATUS_ACTIVE,
     CARD_STATUS_NEW,
+    normalize_batch_status,
     normalize_card_status,
     normalize_project_status,
     sync_project_status_from_cards,
@@ -21,6 +25,7 @@ def _batch_row_fields(
     db: Session,
     version: BomVersion,
     *,
+    project: Project,
     users_by_id: dict[int, str],
 ) -> dict:
     lines = list(db.scalars(select(BomLine).where(BomLine.bom_version_id == version.id)))
@@ -34,10 +39,17 @@ def _batch_row_fields(
 
     user_id = version.imported_by_user_id or version.created_by_id
     updated_by_name = users_by_id.get(user_id) if user_id else None
+    imported = version.imported_at is not None or bom_items_count > 0
 
     return {
         "bom_items_count": bom_items_count,
-        "batch_status": version.status,
+        "batch_status": normalize_batch_status(
+            version.status,
+            is_active=version.is_active,
+            imported=imported,
+        ),
+        "is_active_batch": version.is_active,
+        "is_project_primary_batch": project.active_version_id == version.id,
         "opened_at": opened_at,
         "closed_at": closed_at,
         "updated_at": updated_at,
@@ -123,7 +135,9 @@ def build_workspace(db: Session, *, q: str | None = None) -> dict:
                         ],
                     ):
                         continue
-                    metrics = _batch_row_fields(db, version, users_by_id=users_by_id)
+                    metrics = _batch_row_fields(
+                        db, version, project=project, users_by_id=users_by_id
+                    )
                     row = {
                         "batch_id": version.id,
                         "batch_label": batch_label,
@@ -139,7 +153,6 @@ def build_workspace(db: Session, *, q: str | None = None) -> dict:
                         "customer_name": customer.name,
                         "bom_version_label": version.version_label,
                         "bom_version_name": version.version_name,
-                        "is_active_batch": project.active_version_id == version.id,
                         **metrics,
                     }
                     card_batches.append(row)
@@ -236,7 +249,7 @@ def create_project_card(
     name: str,
     code: str | None = None,
     board_name: str | None = None,
-    status: str = CARD_STATUS_NEW,
+    status: str = CARD_STATUS_ACTIVE,
     build_quantity: int = 1,
     notes: str | None = None,
 ) -> ProjectCard:
@@ -248,7 +261,7 @@ def create_project_card(
         name=name.strip(),
         code=(code or "").strip() or None,
         board_name=(board_name or "").strip() or None,
-        status=normalize_card_status(status or CARD_STATUS_NEW),
+        status=normalize_card_status(status or CARD_STATUS_ACTIVE),
         build_quantity=build_quantity if build_quantity > 0 else 1,
         notes=notes,
     )
@@ -321,6 +334,38 @@ def _copy_bom_lines(
     return inserted
 
 
+def activate_card_batch(
+    db: Session,
+    version: BomVersion,
+    project: Project,
+    *,
+    set_project_primary: bool = True,
+) -> None:
+    """Activate a batch on its card and optionally set it as the project primary batch."""
+    if version.card_id is not None:
+        for other in db.scalars(
+            select(BomVersion).where(
+                BomVersion.card_id == version.card_id,
+                BomVersion.id != version.id,
+            )
+        ):
+            other.is_active = False
+            if normalize_batch_status(other.status, is_active=False) == BATCH_STATUS_ACTIVE:
+                other.status = BATCH_STATUS_NEW
+
+    version.is_active = True
+    version.status = BATCH_STATUS_ACTIVE
+
+    if set_project_primary:
+        project.active_version_id = version.id
+
+    if version.card_id is not None:
+        card = db.get(ProjectCard, version.card_id)
+        if card is not None and normalize_card_status(card.status) == CARD_STATUS_NEW:
+            card.status = CARD_STATUS_ACTIVE
+            sync_project_status_from_cards(db, project)
+
+
 def create_card_batch(
     db: Session,
     *,
@@ -350,7 +395,7 @@ def create_card_batch(
         batch_label=label,
         version_label=label,
         version_name=label,
-        status="Draft",
+        status=BATCH_STATUS_ACTIVE if set_active else BATCH_STATUS_NEW,
         source="copy" if copy_from_version_id else "manual",
         is_active=set_active,
         build_quantity=build_quantity or card.build_quantity,
@@ -374,11 +419,6 @@ def create_card_batch(
         reanalyze_bom_version_quality(db, version.id)
 
     if set_active:
-        db.query(BomVersion).filter(
-            BomVersion.project_id == project.id,
-            BomVersion.id != version.id,
-        ).update({BomVersion.is_active: False})
-        project.active_version_id = version.id
-        version.is_active = True
+        activate_card_batch(db, version, project, set_project_primary=True)
 
     return version

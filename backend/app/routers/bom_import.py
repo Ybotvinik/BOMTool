@@ -20,6 +20,7 @@ from app.schemas.bom_import import (
     ExtractedMetadata,
 )
 from app.services.activity import log_activity
+from app.services.project_workspace import activate_card_batch
 from app.services.bom_parser import (
     clean_display,
     detect_header_row,
@@ -390,12 +391,7 @@ def commit_bom(
         )
 
     if payload.set_active:
-        # Ensure exactly one active version for this project.
-        db.query(BomVersion).filter(
-            BomVersion.project_id == payload.project_id,
-            BomVersion.id != version.id,
-        ).update({BomVersion.is_active: False})
-        project.active_version_id = version.id
+        activate_card_batch(db, version, project, set_project_primary=True)
 
     db.flush()
     # Auto-run quality analysis on the freshly imported lines.

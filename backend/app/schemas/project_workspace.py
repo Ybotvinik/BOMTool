@@ -13,7 +13,7 @@ class ProjectCardCreate(BaseModel):
     name: str
     code: str | None = None
     board_name: str | None = None
-    status: str = "NEW"
+    status: str = "ACTIVE"
     build_quantity: int = Field(default=1, gt=0)
     notes: str | None = None
 
@@ -79,6 +79,7 @@ class WorkspaceBatchRow(BaseModel):
     bom_version_label: str | None = None
     bom_version_name: str | None = None
     is_active_batch: bool = False
+    is_project_primary_batch: bool = False
     bom_items_count: int = 0
     opened_at: datetime | None = None
     closed_at: datetime | None = None

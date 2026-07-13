@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import BomLine, BomVersion, Customer, Project, ProjectCard
-from app.services.project_status import normalize_card_status, normalize_project_status
+from app.services.project_status import normalize_batch_status, normalize_card_status, normalize_project_status
 
 
 def build_project_overview(db: Session, project_id: int) -> dict:
@@ -57,10 +57,16 @@ def build_project_overview(db: Session, project_id: int) -> dict:
                     "batch_label": label,
                     "version_label": version.version_label,
                     "version_name": version.version_name,
-                    "status": version.status,
+                    "status": normalize_batch_status(
+                        version.status,
+                        is_active=version.is_active,
+                        imported=line_counts.get(version.id, 0) > 0
+                        or version.imported_at is not None,
+                    ),
                     "build_quantity": version.build_quantity,
                     "bom_items_count": line_counts.get(version.id, 0),
                     "is_project_active": project.active_version_id == version.id,
+                    "is_active": version.is_active,
                 }
             )
         card_payloads.append(

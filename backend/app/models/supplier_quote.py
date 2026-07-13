@@ -67,7 +67,7 @@ class SupplierQuoteLine(Base):
     )
     line_number: Mapped[int | None] = mapped_column(Integer)
     quantity: Mapped[float | None] = mapped_column(Numeric(14, 4))
-    designator: Mapped[str | None] = mapped_column(String(255))
+    designator: Mapped[str | None] = mapped_column(Text)
     mpn: Mapped[str | None] = mapped_column(String(120))
     quoted_mpn: Mapped[str | None] = mapped_column(String(120))
     cleaned_quoted_mpn: Mapped[str | None] = mapped_column(String(120))

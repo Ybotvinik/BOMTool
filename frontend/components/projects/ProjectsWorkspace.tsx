@@ -85,6 +85,7 @@ type WorkspaceBatch = {
   bom_version_label: string | null;
   bom_version_name: string | null;
   is_active_batch: boolean;
+  is_project_primary_batch?: boolean;
   bom_items_count: number;
   opened_at: string | null;
   closed_at: string | null;
@@ -241,7 +242,7 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
   const [fCardName, setFCardName] = useState("");
   const [fCardBoard, setFCardBoard] = useState("");
   const [fCardQty, setFCardQty] = useState(1);
-  const [fCardStatus, setFCardStatus] = useState("NEW");
+  const [fCardStatus, setFCardStatus] = useState("ACTIVE");
   const [fCardNotes, setFCardNotes] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -907,6 +908,9 @@ export function ProjectsWorkspace({ live, onReload }: Props) {
                               <span className="font-medium text-slate-800 truncate">{batch.batch_label}</span>
                               {batch.is_active_batch && (
                                 <Badge className="bg-green-50 text-green-700 border-green-200 text-[9px]">פעיל</Badge>
+                              )}
+                              {batch.is_project_primary_batch && (
+                                <Badge className="bg-amber-50 text-amber-800 border-amber-200 text-[9px]">★ ראשי</Badge>
                               )}
                             </div>
                             <div className="text-[10px] text-slate-500 mt-0.5">

@@ -344,6 +344,48 @@ function OfficialPricingPageInner() {
     note: "",
   });
 
+  function openManualLine(line: WorkbenchLine) {
+    setManualLine(line);
+    setManualError(null);
+    const saved = line.saved_manual;
+    if (line.selected_source_type === "manual" && saved?.unit_price != null) {
+      setManualForm({
+        supplier_name: saved.supplier_name ?? "",
+        supplier_part_number: saved.supplier_part_number ?? "",
+        unit_price: String(saved.unit_price),
+        currency: saved.currency || "USD",
+        stock: saved.stock != null ? String(saved.stock) : "",
+        lead_time: saved.lead_time ?? "",
+        note: saved.note ?? "",
+      });
+      return;
+    }
+    if (saved?.unit_price != null) {
+      setManualForm({
+        supplier_name: saved.supplier_name ?? "",
+        supplier_part_number: saved.supplier_part_number ?? "",
+        unit_price: String(saved.unit_price),
+        currency: saved.currency || "USD",
+        stock: saved.stock != null ? String(saved.stock) : "",
+        lead_time: saved.lead_time ?? "",
+        note: saved.note ?? "",
+      });
+      return;
+    }
+    setManualForm({
+      supplier_name:
+        line.selected_source_type === "manual" && line.notes
+          ? line.notes.split(" — ")[0]
+          : "",
+      supplier_part_number: line.supplier_part_number ?? "",
+      unit_price: line.unit_price != null ? String(line.unit_price) : "",
+      currency: line.currency || "USD",
+      stock: line.stock != null ? String(line.stock) : "",
+      lead_time: line.lead_time ?? "",
+      note: line.notes ?? "",
+    });
+  }
+
   const selCompact = "h-7 rounded-md border border-slate-200 px-2 text-[11px] bg-white";
   const sel = `${selCompact} w-full`;
 
@@ -479,6 +521,10 @@ function OfficialPricingPageInner() {
       setHasEastPricing(data.has_east_pricing);
       setEastQuotes(data.east_quotes ?? []);
       setPricingComparison(data.pricing_comparison ?? null);
+      setDrawerLine((current) => {
+        if (!current) return null;
+        return data.lines.find((l) => l.bom_line_id === current.bom_line_id) ?? current;
+      });
       setError(null);
     } catch (e) {
       setLines([]);
@@ -729,6 +775,7 @@ function OfficialPricingPageInner() {
 
   async function selectOffer(supplier: string, needsReview: boolean, internalOnly?: boolean) {
     if (projectId == null || versionId == null || !drawerLine) return;
+    setManualLine(null);
     const row = await apiPost<WorkbenchLine>(
       "/api/official-pricing/workbench/select",
       {
@@ -742,7 +789,7 @@ function OfficialPricingPageInner() {
       user.id,
     );
     updateLine(row);
-    setDrawerLine(null);
+    setDrawerLine(row);
     await loadWorkbench();
   }
 
@@ -759,7 +806,7 @@ function OfficialPricingPageInner() {
       user.id,
     );
     updateLine(row);
-    setDrawerLine(null);
+    setDrawerLine(row);
     await loadWorkbench();
   }
 
@@ -796,7 +843,7 @@ function OfficialPricingPageInner() {
       updateLine(row);
       await loadWorkbench();
       setManualLine(null);
-      setDrawerLine(null);
+      setDrawerLine(row);
     } catch (e) {
       setManualError(String(e).replace(/^Error:\s*/, ""));
     } finally {
@@ -1217,7 +1264,12 @@ function OfficialPricingPageInner() {
                   <td className="py-1 px-1.5 align-top tabular-nums">{ln.stock ?? "—"}</td>
                   <td className="py-1 px-1.5 align-top"><LineStatusBadge status={ln.status} /></td>
                   <td className="py-1 px-1.5 align-top"><SolutionStatusBadge status={ln.solution_status} /></td>
-                  <td className="py-1 px-1.5 align-top truncate text-[10px] text-slate-500" title={ln.notes ?? undefined}>{ln.notes ?? "—"}</td>
+                  <td
+                    className="py-1 px-1.5 align-top truncate text-[10px] text-slate-500"
+                    title={ln.east_pricing_disabled_note ?? ln.notes ?? undefined}
+                  >
+                    {ln.east_pricing_disabled_note ?? ln.notes ?? "—"}
+                  </td>
                   <td className="py-1 px-1.5 align-top">
                     <RowActionsMenu
                       onSelectSupplier={() => setDrawerLine(ln)}
@@ -1258,22 +1310,7 @@ function OfficialPricingPageInner() {
         onSelectTbd={() => selectSpecial("tbd")}
         onSelectDnp={() => selectSpecial("dnp")}
         onOpenManual={() => {
-          if (drawerLine) {
-            setManualLine(drawerLine);
-            setManualError(null);
-            setManualForm({
-              supplier_name:
-                drawerLine.selected_source_type === "manual" && drawerLine.notes
-                  ? drawerLine.notes.split(" — ")[0]
-                  : "",
-              supplier_part_number: drawerLine.supplier_part_number ?? "",
-              unit_price: drawerLine.unit_price != null ? String(drawerLine.unit_price) : "",
-              currency: drawerLine.currency || "USD",
-              stock: drawerLine.stock != null ? String(drawerLine.stock) : "",
-              lead_time: drawerLine.lead_time ?? "",
-              note: drawerLine.notes ?? "",
-            });
-          }
+          if (drawerLine) openManualLine(drawerLine);
         }}
       />
 
@@ -1304,6 +1341,15 @@ function OfficialPricingPageInner() {
           <div className="absolute inset-0 bg-black/30" onClick={() => setManualLine(null)} />
           <Card className="relative w-full max-w-md p-4 z-10 space-y-2">
             <h3 className="text-[14px] font-bold">מקור ידני (Manual)</h3>
+            {manualLine.selected_source_type !== "manual" && manualLine.unit_price != null && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+                מקור פעיל כרגע: <strong>{manualLine.source}</strong> ·{" "}
+                {fmtPrice(manualLine.unit_price, manualLine.currency)} / יח׳ — שמירה כאן תחליף למחיר ידני.
+              </p>
+            )}
+            <p className="text-[11px] text-slate-500">
+              לבחירת מחיר מזרח (Link) — סגור חלון זה ולחץ «בחר» על Link בסעיף ב׳.
+            </p>
             {manualError && (
               <p className="text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-md px-2 py-1.5">
                 {manualError}

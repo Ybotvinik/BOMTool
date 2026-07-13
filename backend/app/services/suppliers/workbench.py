@@ -285,16 +285,26 @@ def _manual_source_label(name: str | None) -> str:
     return "Manual"
 
 
+def _normalize_east_supplier_key(name: str | None) -> str:
+    return (name or "east").strip().lower().replace(" ", "_")
+
+
+def _find_east_offer(east_offers: list[dict], supplier_key: str | None) -> dict | None:
+    if not supplier_key or not east_offers:
+        return None
+    target = _normalize_east_supplier_key(supplier_key)
+    for offer in east_offers:
+        if _normalize_east_supplier_key(offer.get("supplier")) == target:
+            return offer
+        if _normalize_east_supplier_key(offer.get("supplier_display")) == target:
+            return offer
+    return None
+
+
 def _is_manual_override(override: OfficialPricingLineOverride | None) -> bool:
     if override is None or override.manual_unit_price is None:
         return False
-    if override.selected_source_type == SOURCE_TYPE_MANUAL:
-        return True
-    # Legacy rows: manual fields saved without selected_source_type=manual.
-    return bool(
-        override.user_selected
-        and override.selected_source_type not in (SOURCE_TYPE_SUPPLIER, SOURCE_TYPE_TBD, SOURCE_TYPE_DNP)
-    )
+    return override.selected_source_type == SOURCE_TYPE_MANUAL
 
 
 def _resolved_manual_selection(
@@ -350,11 +360,6 @@ def resolve_line_selection(
             selected_supplier=None,
             selected_source_type=SOURCE_TYPE_DNP,
         )
-
-    # Persisted manual override — always wins over auto-selection.
-    if _is_manual_override(override):
-        assert override is not None
-        return _resolved_manual_selection(override, req_qty)
 
     if override and override.user_selected and override.selected_source_type == SOURCE_TYPE_DNP:
         return ResolvedSelection(
@@ -442,15 +447,15 @@ def resolve_line_selection(
             and override.selected_source_type == SOURCE_TYPE_EAST
             and override.selected_supplier
         ):
-            match = next(
-                (o for o in east_offers if o.get("supplier") == override.selected_supplier),
-                None,
-            )
+            match = _find_east_offer(east_offers, override.selected_supplier)
             if match and match.get("unit_price") is not None:
                 sel = _selection_from_east_offer(match, req_qty, notes=override.note)
                 if override.manually_approved_possible_match:
                     sel.manually_approved_possible_match = True
                 return sel
+
+        if override.selected_source_type == SOURCE_TYPE_MANUAL and override.manual_unit_price is not None:
+            return _resolved_manual_selection(override, req_qty)
 
     candidates = [_result_for_supplier(results_map, bl.id, s) for s in priority]
     east_sel, kind = _auto_select_best(candidates, east_offers, priority, include_east=include_east)
@@ -621,9 +626,12 @@ def _offer_key(offer: dict) -> str:
 
 def _selection_matches_offer(sel: ResolvedSelection, offer: dict) -> bool:
     if offer.get("internal_only"):
-        return (
-            sel.selected_source_type == SOURCE_TYPE_EAST
-            and sel.selected_supplier == offer.get("supplier")
+        if sel.selected_source_type != SOURCE_TYPE_EAST:
+            return False
+        return _normalize_east_supplier_key(sel.selected_supplier) == _normalize_east_supplier_key(
+            offer.get("supplier")
+        ) or _normalize_east_supplier_key(sel.selected_supplier) == _normalize_east_supplier_key(
+            offer.get("supplier_display")
         )
     return (
         sel.selected_source_type == SOURCE_TYPE_SUPPLIER
@@ -880,6 +888,23 @@ def get_workbench_results(
                 "line_pricing": line_cmp,
                 "recommended_supplier": recommended.get("supplier_display") if recommended else None,
                 "recommended_internal_only": bool(recommended and recommended.get("internal_only")),
+                "saved_manual": (
+                    {
+                        "supplier_name": override.manual_supplier_name,
+                        "supplier_part_number": override.manual_supplier_part_number,
+                        "unit_price": float(override.manual_unit_price),
+                        "currency": override.manual_currency or "USD",
+                        "stock": (
+                            float(override.manual_stock)
+                            if override.manual_stock is not None
+                            else None
+                        ),
+                        "lead_time": override.manual_lead_time,
+                        "note": override.note,
+                    }
+                    if override and override.manual_unit_price is not None
+                    else None
+                ),
             }
         )
 
@@ -958,15 +983,16 @@ def select_line_offer(
             raise ValueError("supplier required")
         override.selected_source_type = SOURCE_TYPE_SUPPLIER
         override.selected_supplier = supplier
-    elif offer_type == SOURCE_TYPE_EAST:
+    elif offer_type in (SOURCE_TYPE_EAST, "east"):
         if not supplier:
             raise ValueError("supplier required")
         override.selected_source_type = SOURCE_TYPE_EAST
-        override.selected_supplier = supplier
+        override.selected_supplier = _normalize_east_supplier_key(supplier)
     else:
         raise ValueError(f"Unknown offer_type: {offer_type}")
 
     db.commit()
+    db.expire_all()
     return get_workbench_line(db, project_id=project_id, bom_version_id=bom_version_id, bom_line_id=bom_line_id)
 
 

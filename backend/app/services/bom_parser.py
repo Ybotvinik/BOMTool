@@ -10,7 +10,9 @@ from __future__ import annotations
 import csv
 import io
 import re
+import zipfile
 
+import xlrd
 from openpyxl import load_workbook
 
 # Canonical BOM line fields the importer can map columns onto. Order matters for
@@ -120,35 +122,124 @@ def _stringify(value: object) -> str:
     return str(value).strip()
 
 
-def list_sheet_names(content: bytes, filename: str) -> tuple[list[str], str]:
-    """Return (sheet_names, active_sheet_name) without loading row data."""
-    name = (filename or "").lower()
+def _spreadsheet_kind(content: bytes, filename: str) -> str:
+    """Detect csv / xlsx / xls from content and filename."""
+    name = (filename or "").lower().strip()
     if name.endswith(".csv"):
-        return ["CSV"], "CSV"
+        return "csv"
+    if content[:2] == b"PK":
+        return "xlsx"
+    if len(content) >= 8 and content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return "xls"
+    if name.endswith(".xlsx"):
+        return "xlsx"
+    if name.endswith(".xls"):
+        return "xls"
+    raise ValueError(
+        "הקובץ אינו Excel תקין. יש להעלות קובץ .xlsx (מומלץ) או .xls. "
+        "אם ייצאת מ-Google Sheets, בחר File → Download → Microsoft Excel (.xlsx)."
+    )
 
-    wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+
+def _xlsx_error_message(exc: Exception, filename: str) -> str:
+    msg = str(exc).lower()
+    name = (filename or "").lower()
+    if "not a zip file" in msg:
+        if name.endswith(".xls") and not name.endswith(".xlsx"):
+            return (
+                "קובץ .xls (Excel ישן) — המערכת תומכת בו; אם השגיאה חוזרת, "
+                "פתח ב-Excel ושמור מחדש כ-.xlsx."
+            )
+        return (
+            "הקובץ אינו Excel (.xlsx) תקין — ייתכן שהוא CSV/HTML עם סיומת שגויה, "
+            "או שהקובץ פגום. שמור מחדש מ-Excel כ-.xlsx."
+        )
+    return str(exc)
+
+
+def _load_xlsx_sheet_names(content: bytes) -> tuple[list[str], str]:
+    try:
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except (zipfile.BadZipFile, OSError, ValueError) as exc:
+        raise ValueError(_xlsx_error_message(exc, "")) from exc
     sheet_names = list(wb.sheetnames)
     active = wb.active.title if wb.active else (sheet_names[0] if sheet_names else "")
     wb.close()
     return sheet_names, active
 
 
+def _load_xlsx_rows(content: bytes, sheet_name: str | None) -> tuple[list[str], str, list[list[str]]]:
+    try:
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except (zipfile.BadZipFile, OSError, ValueError) as exc:
+        raise ValueError(_xlsx_error_message(exc, "")) from exc
+    sheet_names = list(wb.sheetnames)
+    ws = wb[sheet_name] if sheet_name in sheet_names else wb.active
+    rows = [[_stringify(c) for c in raw] for raw in ws.iter_rows(values_only=True)]
+    title = ws.title
+    wb.close()
+    return sheet_names, title, rows
+
+
+def _load_xls_sheet_names(content: bytes) -> tuple[list[str], str]:
+    try:
+        book = xlrd.open_workbook(file_contents=content)
+    except xlrd.XLRDError as exc:
+        raise ValueError(
+            "לא ניתן לקרוא קובץ Excel ישן (.xls). פתח ב-Excel ושמור מחדש כ-.xlsx."
+        ) from exc
+    sheet_names = book.sheet_names()
+    active = sheet_names[0] if sheet_names else ""
+    return sheet_names, active
+
+
+def _load_xls_rows(content: bytes, sheet_name: str | None) -> tuple[list[str], str, list[list[str]]]:
+    try:
+        book = xlrd.open_workbook(file_contents=content)
+    except xlrd.XLRDError as exc:
+        raise ValueError(
+            "לא ניתן לקרוא קובץ Excel ישן (.xls). פתח ב-Excel ושמור מחדש כ-.xlsx."
+        ) from exc
+    sheet_names = book.sheet_names()
+    if sheet_name and sheet_name in sheet_names:
+        sheet = book.sheet_by_name(sheet_name)
+    else:
+        sheet = book.sheet_by_index(0)
+    rows = [
+        [_stringify(sheet.cell_value(r, c)) for c in range(sheet.ncols)]
+        for r in range(sheet.nrows)
+    ]
+    return sheet_names, sheet.name, rows
+
+
+def list_sheet_names(content: bytes, filename: str) -> tuple[list[str], str]:
+    """Return (sheet_names, active_sheet_name) without loading row data."""
+    kind = _spreadsheet_kind(content, filename)
+    if kind == "csv":
+        return ["CSV"], "CSV"
+    if kind == "xls":
+        return _load_xls_sheet_names(content)
+    try:
+        return _load_xlsx_sheet_names(content)
+    except ValueError as exc:
+        raise ValueError(_xlsx_error_message(exc, filename)) from exc
+
+
 def list_sheets_and_rows(
     content: bytes, filename: str, sheet_name: str | None = None
 ) -> tuple[list[str], str, list[list[str]]]:
     """Return (sheet_names, active_sheet_name, rows) for the chosen sheet."""
-    name = (filename or "").lower()
-    if name.endswith(".csv"):
+    kind = _spreadsheet_kind(content, filename)
+    if kind == "csv":
         text = content.decode("utf-8-sig", errors="replace")
         rows = [[_stringify(c) for c in r] for r in csv.reader(io.StringIO(text))]
         return ["CSV"], "CSV", rows
-
-    wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    sheet_names = list(wb.sheetnames)
-    ws = wb[sheet_name] if sheet_name in sheet_names else wb.active
-    rows = [[_stringify(c) for c in raw] for raw in ws.iter_rows(values_only=True)]
-    wb.close()
-    return sheet_names, ws.title, rows
+    if kind == "xls":
+        return _load_xls_rows(content, sheet_name)
+    try:
+        return _load_xlsx_rows(content, sheet_name)
+    except ValueError as exc:
+        raise ValueError(_xlsx_error_message(exc, filename)) from exc
 
 
 def _keyword_hits(row: list[str]) -> int:

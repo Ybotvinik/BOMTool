@@ -22,6 +22,7 @@ from app.schemas.bom_compare import (
 )
 from app.schemas.bom_version import BomVersionRead
 from app.services.bom_quality import compute_quality_summary, parse_refdes
+from app.services.project_workspace import activate_card_batch
 
 CHANGE_ADDED = "Added"
 CHANGE_REMOVED = "Removed"
@@ -369,14 +370,6 @@ def activate_bom_version(db: Session, version_id: int) -> BomVersion:
     if project is None:
         raise ValueError("Project not found")
 
-    for other in db.scalars(
-        select(BomVersion).where(
-            BomVersion.project_id == project.id, BomVersion.id != version.id
-        )
-    ):
-        other.is_active = False
-
-    version.is_active = True
-    project.active_version_id = version.id
+    activate_card_batch(db, version, project, set_project_primary=True)
     db.flush()
     return version
