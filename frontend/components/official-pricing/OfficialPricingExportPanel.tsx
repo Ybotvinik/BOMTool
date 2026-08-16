@@ -49,7 +49,6 @@ function ExportCard({
   disabledReason,
   busy,
   busyKey,
-  exportKey,
   onExport,
   buttonClassName = "inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-slate-200 bg-white text-[12px] hover:bg-slate-50 disabled:opacity-60",
   iconSize = "h-7 w-7",
@@ -61,7 +60,6 @@ function ExportCard({
   disabledReason?: string;
   busy: string | null;
   busyKey: string;
-  exportKey: string;
   onExport: () => void;
   buttonClassName?: string;
   iconSize?: string;
@@ -227,7 +225,6 @@ export function OfficialPricingExportPanel({
             }
             busy={busy}
             busyKey="workbench"
-            exportKey="workbench"
             onExport={() =>
               runExport("workbench", "/api/exports/supplier-pricing-workbench", {
                 project_id: projectId!,
@@ -306,7 +303,6 @@ export function OfficialPricingExportPanel({
             disabledReason={scopeDisabledReason}
             busy={busy}
             busyKey="quality"
-            exportKey="quality"
             onExport={() =>
               runExport("quality", "/api/exports/internal-bom-quality", {
                 project_id: projectId!,
@@ -324,7 +320,6 @@ export function OfficialPricingExportPanel({
               disabledReason={pricingDisabledReason}
               busy={busy}
               busyKey="pricing"
-              exportKey="pricing"
               onExport={() =>
                 runExport("pricing", "/api/exports/internal-pricing-workbench", {
                   project_id: projectId!,
@@ -358,7 +353,6 @@ export function OfficialPricingExportPanel({
             disabledReason={pricingDisabledReason}
             busy={busy}
             busyKey="comparison"
-            exportKey="comparison"
             onExport={() =>
               runExport("comparison", "/api/exports/internal-pricing-comparison", {
                 project_id: projectId!,

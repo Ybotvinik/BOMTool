@@ -1,11 +1,11 @@
-FROM node:20-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json yarn.lock ./
-RUN corepack enable && yarn install --frozen-lockfile
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate && yarn install --frozen-lockfile
 
 COPY . .
 
@@ -14,7 +14,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN yarn build
 
-FROM node:20-slim AS runner
+FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
@@ -23,8 +23,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+RUN groupadd --system --gid 1001 nodejs && useradd --system --uid 1001 --gid nodejs nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
 
 EXPOSE 3000
 

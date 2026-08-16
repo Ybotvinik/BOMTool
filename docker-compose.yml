@@ -1,3 +1,8 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 services:
   db:
     image: postgres:16-alpine
@@ -7,8 +12,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-glintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-glintech}
       POSTGRES_DB: ${POSTGRES_DB:-glintech}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # ports:
+    #   - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,11 +21,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *default-logging
 
   backend:
     image: ${BACKEND_IMAGE:-ghcr.io/glintechnology/bomtool-backend}:${IMAGE_TAG:-latest}
     container_name: bomtool_backend
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -48,6 +55,17 @@ services:
     image: ${FRONTEND_IMAGE:-ghcr.io/glintechnology/bomtool-frontend}:${IMAGE_TAG:-latest}
     container_name: bomtool_frontend
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 300m
+    cpus: 0.75
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - backend
     expose:
@@ -57,6 +75,7 @@ services:
     image: nginx:1.27-alpine
     container_name: bomtool_gateway
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - frontend
       - backend
