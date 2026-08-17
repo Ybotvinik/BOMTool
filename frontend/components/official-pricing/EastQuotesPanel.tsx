@@ -208,12 +208,20 @@ export function EastQuotesPanel({
           onError={onError}
           onImported={(res) => {
             const matched = res.match_summary?.matched_count ?? 0;
+            const priced = res.priced_count;
+            const pricedNote =
+              priced != null
+                ? ` · ${priced} עם מחיר`
+                : "";
+            const modeNote = res.include_east_pricing_enabled
+              ? " · מצב משולב הופעל"
+              : "";
             setImportSuccess(
-              `יובאו ${res.lines_imported} שורות · ${matched} הותאמו ל-BOM · מצב משולב הופעל`,
+              `יובאו ${res.lines_imported} שורות · ${matched} הותאמו ל-BOM${pricedNote}${modeNote}`,
             );
             setImportFile(null);
             onChanged();
-            if (res.include_east_pricing_enabled) onIntegratedModeEnabled?.();
+            onIntegratedModeEnabled?.();
           }}
         />
       )}

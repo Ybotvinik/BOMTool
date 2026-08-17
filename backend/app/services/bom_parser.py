@@ -116,6 +116,25 @@ def clean_display(name: str) -> str:
     return re.sub(r"\s+", " ", s)
 
 
+def uniquify_headers(headers: list[str]) -> list[str]:
+    """Give duplicate header labels a stable suffix so mapping can target each block.
+
+    Link / East quote files often repeat Vendor / QTY / Unit Price USD for a
+    second source. Without this, name→index mapping silently keeps the last copy.
+    """
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for raw in headers:
+        key = (raw or "").strip()
+        if not key:
+            out.append(raw or "")
+            continue
+        n = seen.get(key, 0)
+        seen[key] = n + 1
+        out.append(key if n == 0 else f"{key} ({n + 1})")
+    return out
+
+
 def _stringify(value: object) -> str:
     if value is None:
         return ""

@@ -37,6 +37,7 @@ type ImportResult = {
     lines_total?: number;
   };
   include_east_pricing_enabled?: boolean;
+  priced_count?: number;
 };
 
 const MAP_FIELDS: { key: string; label: string; required?: boolean }[] = [

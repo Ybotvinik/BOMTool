@@ -16,8 +16,14 @@ from app.services.east_quotes.link_parser import (
 )
 from app.services.east_quotes.east_mapping import suggest_east_mapping
 from app.services.east_quotes.matching import match_east_quote_lines
+from app.services.suppliers.base import parse_money
 from app.services.file_storage import get_file_storage
-from app.services.bom_parser import clean_display, detect_header_row, list_sheets_and_rows
+from app.services.bom_parser import (
+    clean_display,
+    detect_header_row,
+    list_sheets_and_rows,
+    uniquify_headers,
+)
 
 SOURCE_TYPE_EAST = "east"
 
@@ -215,11 +221,30 @@ def preview_east_quote(
     total_rows = 0
     suggested: dict[str, str | None] = {}
     if used_index is not None:
-        columns = [clean_display(c) for c in rows[used_index]]
+        columns = uniquify_headers([clean_display(c) for c in rows[used_index]])
         data_rows = [r for r in rows[used_index + 1 :] if any(x.strip() for x in r)]
         total_rows = len(data_rows)
         preview_rows = [[clean_display(c) for c in r] for r in data_rows[:PREVIEW_ROWS]]
         suggested = suggest_east_mapping(columns)
+        price_col = suggested.get("unit_price")
+        if price_col and total_rows:
+            try:
+                pidx = columns.index(price_col)
+            except ValueError:
+                pidx = -1
+            priced = 0
+            if pidx >= 0:
+                priced = sum(
+                    1
+                    for r in data_rows
+                    if pidx < len(r) and parse_money(r[pidx]) is not None
+                )
+            if priced * 2 < total_rows:
+                extra = (
+                    f"רק {priced}/{total_rows} שורות עם מחיר בעמודה «{price_col}». "
+                    "בקובץ Link יש לעיתים שני בלוקי Vendor — בחר את Unit Price USD הראשון (Link)."
+                )
+                warning = f"{warning} {extra}".strip() if warning else extra
     else:
         warning = "לא זוהתה שורת כותרות — יש לבחור ידנית."
 
@@ -401,6 +426,7 @@ def upload_east_quote(
     )
     db.commit()
 
+    priced_count = sum(1 for ln in parsed.lines if ln.unit_price is not None)
     return {
         "quote_id": quote.id,
         "supplier_name": quote_supplier_name,
@@ -409,6 +435,7 @@ def upload_east_quote(
         "doc_number": parsed.doc_number,
         "revised_date": parsed.revised_date,
         "lines_imported": len(parsed.lines),
+        "priced_count": priced_count,
         "dnp_count": match_summary.get("dnp", 0),
         "match_summary": match_summary,
         "is_active": True,

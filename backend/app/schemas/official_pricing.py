@@ -310,9 +310,11 @@ class EastQuoteUploadResult(BaseModel):
     doc_number: str | None = None
     revised_date: str | None = None
     lines_imported: int
+    priced_count: int = 0
     dnp_count: int = 0
     match_summary: dict
     is_active: bool = True
+    include_east_pricing_enabled: bool = False
 
 
 class ExcelSheetsDetect(BaseModel):

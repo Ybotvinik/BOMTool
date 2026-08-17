@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from app.services.bom_parser import clean_display, detect_header_row, list_sheets_and_rows
+from app.services.bom_parser import clean_display, detect_header_row, list_sheets_and_rows, uniquify_headers
 from app.services.suppliers.base import parse_money
 
 FOOTER_LABELS = frozenset({"total price", "unit price", "subtotal", "grand total"})
@@ -104,7 +104,7 @@ def _column_map(header: list[str]) -> dict[str, int]:
     mapping: dict[str, int] = {}
     for idx, col in enumerate(header):
         key = col.strip().lower()
-        if not key:
+        if not key or key in mapping:
             continue
         mapping[key] = idx
     return mapping
@@ -134,11 +134,24 @@ def _parse_qty(text: str) -> float | None:
 
 
 def _indices_from_mapping(header: list[str], column_mapping: dict[str, str | None]) -> dict[str, int | None]:
-    col_index = {h: i for i, h in enumerate(header) if h}
+    uniqued = uniquify_headers(header)
+    col_index: dict[str, int] = {}
+    original_first: dict[str, int] = {}
+    for i, (raw, unique) in enumerate(zip(header, uniqued)):
+        if unique and unique not in col_index:
+            col_index[unique] = i
+        raw_key = (raw or "").strip()
+        if raw_key and raw_key not in original_first:
+            original_first[raw_key] = i
     out: dict[str, int | None] = {}
     for field, column in column_mapping.items():
-        if column and column in col_index:
+        if not column:
+            out[field] = None
+            continue
+        if column in col_index:
             out[field] = col_index[column]
+        elif column in original_first:
+            out[field] = original_first[column]
         else:
             out[field] = None
     return out
